@@ -1,6 +1,7 @@
 package com.baichen.rpc.codec;
 
 import com.alibaba.fastjson2.JSONObject;
+import com.alibaba.fastjson2.JSONReader;
 import com.baichen.rpc.message.Request;
 import com.baichen.rpc.message.Response;
 import com.baichen.rpc.message.Message;
@@ -33,11 +34,11 @@ public class MessageDecoder extends LengthFieldBasedFrameDecoder {
     public MessageDecoder() {
         // LengthFieldBasedFrameDecoder 参数说明:
         // maxFrameLength: 最大帧长度
-        // lengthFieldOffset: 长度字段偏移量（跳过Magic）
+        // lengthFieldOffset: 长度字段偏移量
         // lengthFieldLength: 长度字段长度（4字节int）
         // lengthAdjustment: 长度调整值（Length字段后还需要跳过的字节数）
-        // initialBytesToStrip: 协议头总长度（Length+Magic+Type），解码后跳过
-        super(MAX_FRAME_LENGTH, 4, Integer.BYTES, 0, 14);
+        // initialBytesToStrip: 长度字段之后需要跳过的字节数（通常为长度字段本身的长度）
+        super(MAX_FRAME_LENGTH, 0, Integer.BYTES, 0, Integer.BYTES);
     }
 
     @Override
@@ -75,7 +76,7 @@ public class MessageDecoder extends LengthFieldBasedFrameDecoder {
      * 反序列化为 Request 对象
      */
     private Request deserializeRequest(byte[] body) {
-        return JSONObject.parseObject(new String(body, StandardCharsets.UTF_8), Request.class);
+        return JSONObject.parseObject(new String(body, StandardCharsets.UTF_8), Request.class, JSONReader.Feature.SupportClassForName);
     }
 
     /**

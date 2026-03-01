@@ -27,6 +27,8 @@ public class ProviderServer {
      */
     private final int port;
 
+    private final ProviderRegister providerRegister;
+
     /**
      * Boss 事件循环组，负责处理 Accept 事件
      */
@@ -39,6 +41,7 @@ public class ProviderServer {
 
     ProviderServer(int port) {
         this.port = port;
+        this.providerRegister = new ProviderRegister();
     }
 
     /**
@@ -71,10 +74,14 @@ public class ProviderServer {
                                             // 打印收到的请求
                                             System.out.println("收到请求: " + req);
 
+                                            // 根据入参，从注册表中查找对应的服务实例并调用
+                                            ProviderRegister.InvokerInstance<?> invokerInstance = providerRegister.findInvokerInstance(req.getServiceName());
+                                            Object result = invokerInstance.invoke(req.getMethodName(), req.getParamsClass(), req.getParams());
+
                                             // 创建响应对象
                                             Response response = new Response();
-                                            // 调用本地方法计算结果（这里硬编码为 a + b = 1）
-                                            response.setResult(1);
+                                            // 计算结果
+                                            response.setResult(result);
 
                                             // 发送响应给客户端
                                             ctx.channel().writeAndFlush(response);
@@ -97,8 +104,12 @@ public class ProviderServer {
             channelFuture.channel().closeFuture().sync();
         } catch (Exception e) {
             System.out.println("服务端启动失败");
-            e.printStackTrace();
+            throw new RuntimeException(e);
         }
+    }
+
+    public <I> void register(Class<I> iClass, I instance) {
+        providerRegister.register(iClass, instance);
     }
 
     /**

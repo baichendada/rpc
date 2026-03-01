@@ -21,10 +21,10 @@ public class Request {
     /**
      * 参数类型列表，用于方法反射调用
      */
-    private String[] classNames;
+    private Class<?>[] paramsClass;
 
     /**
      * 参数值列表，方法调用的实际参数
      */
-    private String[] params;
+    private Object[] params;
 }
