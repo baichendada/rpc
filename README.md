@@ -8,6 +8,7 @@
 - **Netty 4.1** - 高性能 NIO 网络框架
 - **FastJSON2** - JSON 序列化/反序列化
 - **Lombok** - 简化代码
+- **Logback** - 日志框架
 
 ## 项目结构
 
@@ -31,6 +32,8 @@ src/main/java/com/baichen/rpc/
 └── consumer/           # 客户端
     ├── Consumer.java        # RPC 客户端（实现服务接口）
     └── ConsumerApp.java    # 客户端启动入口
+└── exception/          # 异常处理
+    └── RpcException.java   # RPC 异常
 ```
 
 ## 通信协议
@@ -49,6 +52,15 @@ src/main/java/com/baichen/rpc/
 - Type:    消息类型 (1=Request, 2=Response)
 - Body:    消息体，JSON 格式
 ```
+
+### 响应码
+
+Response 消息体包含响应码：
+
+| 响应码 | 含义 |
+|--------|------|
+| 200    | 成功 |
+| 400    | 错误 |
 
 ### 协议处理流程
 
@@ -126,11 +138,15 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] JSON 序列化
 - [x] 服务注册与发现
 - [x] 反射调用服务端方法
+- [x] Logback 日志框架
+- [x] 响应码机制（成功/失败）
+- [x] 错误处理与异常传递
+- [x] 调用超时机制（3秒）
 
 ## 待完善功能
 
 - [ ] 多种序列化方式（Hessian、Protobuf）
 - [ ] 负载均衡
-- [ ] 超时与重试机制
+- [ ] 重试机制
 - [ ] 连接池
 - [ ] 服务治理（熔断、限流）

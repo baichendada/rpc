@@ -3,14 +3,17 @@ package com.baichen.rpc.consumer;
 import com.baichen.rpc.api.Add;
 import com.baichen.rpc.codec.MessageDecoder;
 import com.baichen.rpc.codec.RequestEncoder;
+import com.baichen.rpc.exception.RpcException;
 import com.baichen.rpc.message.Request;
 import com.baichen.rpc.message.Response;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * RPC 客户端
@@ -23,6 +26,7 @@ import java.util.concurrent.CompletableFuture;
  * 3. SimpleChannelInboundHandler - 处理响应
  * 4. ChannelInboundHandlerAdapter - 捕获未处理的消息（用于调试）
  */
+@Slf4j
 public class Consumer implements Add {
 
     /**
@@ -55,17 +59,21 @@ public class Consumer implements Add {
                                         @Override
                                         protected void channelRead0(ChannelHandlerContext ctx, Response resp) throws Exception {
                                             // 打印收到的响应
-                                            System.out.println("收到响应: " + resp);
+                                            log.info("收到响应: {}", resp);
                                             // 从响应中获取结果并完成 Future
-                                            Integer result = Integer.parseInt(resp.getResult().toString());
-                                            future.complete(result);
+                                            if (Response.ResponseCode.SUCCESS.getCode() == resp.getCode()) {
+                                                Integer result = Integer.parseInt(resp.getResult().toString());
+                                                future.complete(result);
+                                            } else {
+                                                future.completeExceptionally(new RpcException(resp.getErrorMessage()));
+                                            }
                                         }
                                     })
                                     // 4. 调试用：捕获未处理的消息
                                     .addLast(new ChannelInboundHandlerAdapter() {
                                         @Override
                                         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-                                            System.out.println("未处理的消息: " + msg.getClass().getName());
+                                            log.warn("未处理的消息: {}", msg.getClass().getName());
                                             super.channelRead(ctx, msg);
                                         }
                                     });
@@ -85,8 +93,7 @@ public class Consumer implements Add {
             // 发送请求
             channelFuture.channel().writeAndFlush(request);
 
-            // 阻塞等待响应返回
-            return future.get();
+            return future.get(3, TimeUnit.SECONDS);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
