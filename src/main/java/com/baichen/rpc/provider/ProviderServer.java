@@ -113,15 +113,14 @@ public class ProviderServer {
             ProviderRegister.InvokerInstance<?> invokerInstance = providerRegister.findInvokerInstance(req.getServiceName());
             if (invokerInstance == null) {
                 log.error("未找到服务实例: {}", req.getServiceName());
-                Response response = Response.fail("服务未找到: " + req.getServiceName());;
+                Response response = Response.fail("服务未找到: " + req.getServiceName(), req.getRequestId());;
                 ctx.channel().writeAndFlush(response);
                 return;
             }
             try {
                 Object result = invokerInstance.invoke(req.getMethodName(), req.getParamsClass(), req.getParams());
-                Response response = Response.success(result);
+                Response response = Response.success(result, req.getRequestId());
                 ctx.channel().writeAndFlush(response);
-                ctx.close();
             } catch (Exception e) {
                 log.error("调用服务实例失败: {}", e.getMessage());
                 Response response = new Response();

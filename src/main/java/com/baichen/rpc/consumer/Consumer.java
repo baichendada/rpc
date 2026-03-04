@@ -12,7 +12,9 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -28,6 +30,51 @@ import java.util.concurrent.TimeUnit;
  */
 @Slf4j
 public class Consumer implements Add {
+    // 用于维护正在等待响应的请求，key为请求ID，value为对应的 CompletableFuture
+    private static final Map<Integer, CompletableFuture<Integer>> IN_FLIGHT_REQUEST_MAP = new ConcurrentHashMap<>();
+
+    private final ConnectionManager connectionManager = new ConnectionManager(createBootStrap());
+
+    private Bootstrap createBootStrap() {
+        Bootstrap bootstrap = new Bootstrap();
+        bootstrap.group(new NioEventLoopGroup(4))
+                .channel(NioSocketChannel.class)
+                .handler(new ChannelInitializer<NioSocketChannel>() {
+                    @Override
+                    protected void initChannel(NioSocketChannel channel) throws Exception {
+                        channel.pipeline()
+                                // 1. 解码器：解码响应消息
+                                .addLast(new MessageDecoder())
+                                // 2. 编码器：编码请求消息
+                                .addLast(new RequestEncoder())
+                                // 3. 业务处理器：处理服务端响应
+                                .addLast(new SimpleChannelInboundHandler<Response>() {
+                                    @Override
+                                    protected void channelRead0(ChannelHandlerContext ctx, Response resp) throws Exception {
+                                        CompletableFuture<Integer> resultFuture = IN_FLIGHT_REQUEST_MAP.remove(resp.getRequestId());
+                                        // 打印收到的响应
+                                        log.info("收到响应: {}", resp);
+                                        // 从响应中获取结果并完成 Future
+                                        if (Response.ResponseCode.SUCCESS.getCode() == resp.getCode()) {
+                                            Integer result = Integer.parseInt(resp.getResult().toString());
+                                            resultFuture.complete(result);
+                                        } else {
+                                            resultFuture.completeExceptionally(new RpcException(resp.getErrorMessage()));
+                                        }
+                                    }
+                                })
+                                // 4. 调试用：捕获未处理的消息
+                                .addLast(new ChannelInboundHandlerAdapter() {
+                                    @Override
+                                    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+                                        log.warn("未处理的消息: {}", msg.getClass().getName());
+                                        super.channelRead(ctx, msg);
+                                    }
+                                });
+                    }
+                });
+        return bootstrap;
+    }
 
     /**
      * 发起 RPC 调用
@@ -42,46 +89,11 @@ public class Consumer implements Add {
             // 用于接收服务端响应的 CompletableFuture
             CompletableFuture<Integer> future = new CompletableFuture<>();
 
-            // 创建 Netty Bootstrap
-            Bootstrap bootstrap = new Bootstrap();
-            bootstrap.group(new NioEventLoopGroup(4))
-                    .channel(NioSocketChannel.class)
-                    .handler(new ChannelInitializer<NioSocketChannel>() {
-                        @Override
-                        protected void initChannel(NioSocketChannel channel) throws Exception {
-                            channel.pipeline()
-                                    // 1. 解码器：解码响应消息
-                                    .addLast(new MessageDecoder())
-                                    // 2. 编码器：编码请求消息
-                                    .addLast(new RequestEncoder())
-                                    // 3. 业务处理器：处理服务端响应
-                                    .addLast(new SimpleChannelInboundHandler<Response>() {
-                                        @Override
-                                        protected void channelRead0(ChannelHandlerContext ctx, Response resp) throws Exception {
-                                            // 打印收到的响应
-                                            log.info("收到响应: {}", resp);
-                                            // 从响应中获取结果并完成 Future
-                                            if (Response.ResponseCode.SUCCESS.getCode() == resp.getCode()) {
-                                                Integer result = Integer.parseInt(resp.getResult().toString());
-                                                future.complete(result);
-                                            } else {
-                                                future.completeExceptionally(new RpcException(resp.getErrorMessage()));
-                                            }
-                                        }
-                                    })
-                                    // 4. 调试用：捕获未处理的消息
-                                    .addLast(new ChannelInboundHandlerAdapter() {
-                                        @Override
-                                        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-                                            log.warn("未处理的消息: {}", msg.getClass().getName());
-                                            super.channelRead(ctx, msg);
-                                        }
-                                    });
-                        }
-                    });
-
             // 连接到服务端
-            ChannelFuture channelFuture = bootstrap.connect("localhost", 8085).sync();
+            Channel channel = connectionManager.getChannel("localhost", 8085);
+            if (channel == null) {
+                throw new RpcException("无法连接到服务端，host: localhost, port: 8085");
+            }
 
             // 构建 RPC 请求
             Request request = new Request();
@@ -91,7 +103,12 @@ public class Consumer implements Add {
             request.setParams(new Object[]{a, b});
 
             // 发送请求
-            channelFuture.channel().writeAndFlush(request);
+            channel.writeAndFlush(request).addListener(f -> {
+                    if (f.isSuccess()) {
+                        IN_FLIGHT_REQUEST_MAP.putIfAbsent(request.getRequestId(), future);
+                    }
+                }
+            );
 
             return future.get(3, TimeUnit.SECONDS);
         } catch (Exception e) {
