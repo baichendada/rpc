@@ -12,24 +12,21 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import lombok.extern.slf4j.Slf4j;
 
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 /**
- * RPC 客户端
- * <p>
- * 负责向服务端发起远程调用
- * <p>
- * Pipeline 顺序:
- * 1. MessageDecoder - 解码响应消息
- * 2. RequestEncoder - 编码请求消息
- * 3. SimpleChannelInboundHandler - 处理响应
- * 4. ChannelInboundHandlerAdapter - 捕获未处理的消息（用于调试）
+ * ConsumerProxyFactory 负责创建 RPC 客户端的动态代理对象
+ * 通过 Java 的动态代理机制，可以避免接口类中大量的重复代码，简化 RPC 调用的实现
  */
 @Slf4j
-public class Consumer implements Add {
+public class ConsumerProxyFactory {
+
     // 用于维护正在等待响应的请求，key为请求ID，value为对应的 CompletableFuture
     private static final Map<Integer, CompletableFuture<Response>> IN_FLIGHT_REQUEST_MAP = new ConcurrentHashMap<>();
 
@@ -74,55 +71,58 @@ public class Consumer implements Add {
         return bootstrap;
     }
 
-    /**
-     * 发起 RPC 调用
-     *
-     * @param a 加数
-     * @param b 被加数
-     * @return 计算结果
-     */
-    @Override
-    public int add(int a, int b) {
-        try {
-            // 用于接收服务端响应的 CompletableFuture
-            CompletableFuture<Response> future = new CompletableFuture<>();
-
-            // 连接到服务端
-            Channel channel = connectionManager.getChannel("localhost", 8085);
-            if (channel == null) {
-                throw new RpcException("无法连接到服务端，host: localhost, port: 8085");
-            }
-
-            // 构建 RPC 请求
-            Request request = new Request();
-            request.setServiceName(Add.class.getName());
-            request.setMethodName("add");
-            request.setParamsClass(new Class<?>[]{int.class, int.class});
-            request.setParams(new Object[]{a, b});
-
-            // 发送请求
-            channel.writeAndFlush(request).addListener(f -> {
-                    if (f.isSuccess()) {
-                        IN_FLIGHT_REQUEST_MAP.putIfAbsent(request.getRequestId(), future);
+    @SuppressWarnings("unchecked")
+    public <I> I createConsumerProxy(Class<I> interfaceClass) {
+        return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(), new Class[]{interfaceClass}, new InvocationHandler() {
+            @Override
+            public Object invoke(Object proxy, Method method, Object[] args) {
+                if (proxy.getClass().getDeclaringClass() == Object.class) {
+                    if (method.getName().equals("toString")) {
+                        return "ConsumerProxy for " + interfaceClass.getName();
+                    } else if (method.getName().equals("hashCode")) {
+                        return System.identityHashCode(proxy);
+                    } else if (method.getName().equals("equals")) {
+                        return proxy == args[0];
                     }
+                    throw new UnsupportedOperationException(method.getName());
                 }
-            );
 
-            Response resp = future.get(3, TimeUnit.SECONDS);
-            if (Response.ResponseCode.SUCCESS.getCode() == resp.getCode()) {
-                return Integer.parseInt(resp.getResult().toString());
-            } else {
-                throw new RpcException("RPC 调用失败，错误信息: " + resp);
+                try {
+                    // 用于接收服务端响应的 CompletableFuture
+                    CompletableFuture<Response> future = new CompletableFuture<>();
+
+                    // 连接到服务端
+                    Channel channel = connectionManager.getChannel("localhost", 8085);
+                    if (channel == null) {
+                        throw new RpcException("无法连接到服务端，host: localhost, port: 8085");
+                    }
+
+                    // 构建 RPC 请求
+                    Request request = new Request();
+                    request.setServiceName(interfaceClass.getName());
+                    request.setMethodName(method.getName());
+                    request.setParamsClass(method.getParameterTypes());
+                    request.setParams(args);
+
+                    // 发送请求
+                    channel.writeAndFlush(request).addListener(f -> {
+                                if (f.isSuccess()) {
+                                    IN_FLIGHT_REQUEST_MAP.putIfAbsent(request.getRequestId(), future);
+                                }
+                            }
+                    );
+
+                    Response resp = future.get(3, TimeUnit.SECONDS);
+                    if (Response.ResponseCode.SUCCESS.getCode() == resp.getCode()) {
+                        return resp.getResult();
+                    }
+                    throw new RpcException("RPC 调用失败，错误信息: " + resp);
+                } catch (RpcException e) {
+                    throw e;
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
             }
-        } catch (RpcException e) {
-            throw e;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public int minus(int a, int b) {
-        return 0;
+        });
     }
 }
