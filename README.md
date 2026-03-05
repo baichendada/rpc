@@ -31,6 +31,7 @@ src/main/java/com/baichen/rpc/
 │   └── ProviderApp.java     # 服务端启动入口
 └── consumer/           # 客户端
     ├── Consumer.java        # RPC 客户端（实现服务接口）
+    ├── ConsumerProxyFactory.java  # 动态代理工厂
     └── ConsumerApp.java    # 客户端启动入口
 └── exception/          # 异常处理
     └── RpcException.java   # RPC 异常
@@ -130,6 +131,7 @@ RPC 服务端启动成功，监听端口: 8085
 | ProviderRegister | 服务注册表，管理接口与服务实例的映射 |
 | InvokerInstance | 封装服务实例和接口类，通过反射调用方法 |
 | Consumer | 客户端代理，实现服务接口，发起 RPC 调用 |
+| ConsumerProxyFactory | 动态代理工厂，通过 Java 动态代理透明化 RPC 调用 |
 
 ## 当前版本功能
 
@@ -142,6 +144,8 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] 响应码机制（成功/失败）
 - [x] 错误处理与异常传递
 - [x] 调用超时机制（3秒）
+- [x] 连接池管理
+- [x] 动态代理支持
 
 ## 待完善功能
 
