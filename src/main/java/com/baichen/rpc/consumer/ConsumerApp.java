@@ -1,7 +1,7 @@
 package com.baichen.rpc.consumer;
 
 import com.baichen.rpc.api.Add;
-import com.baichen.rpc.register.ServiceRegisterConfig;
+import com.baichen.rpc.registry.ServiceRegistryConfig;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -11,10 +11,12 @@ import lombok.extern.slf4j.Slf4j;
 public class ConsumerApp {
     public static void main(String[] args) throws Exception {
 //        Add consumer = new Consumer();
-        ServiceRegisterConfig serviceRegisterConfig = new ServiceRegisterConfig();
-        serviceRegisterConfig.setRegisterType("zookeeper");
-        serviceRegisterConfig.setConnectString("127.0.0.1:2181");
-        ConsumerProxyFactory consumerProxyFactory = new ConsumerProxyFactory(serviceRegisterConfig);
+        ServiceRegistryConfig serviceRegistryConfig = new ServiceRegistryConfig();
+        serviceRegistryConfig.setRegistryType("zookeeper");
+        serviceRegistryConfig.setConnectString("127.0.0.1:2181");
+        ConsumerProperties consumerProperties = new ConsumerProperties();
+        consumerProperties.setServiceRegistryConfig(serviceRegistryConfig);
+        ConsumerProxyFactory consumerProxyFactory = new ConsumerProxyFactory(consumerProperties);
 //        for (int i = 0; i < 10; i++) {
 //            Add consumer = consumerProxyFactory.createConsumerProxy(Add.class);
 //            // 发起 RPC 调用

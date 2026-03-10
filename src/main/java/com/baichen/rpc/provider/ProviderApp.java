@@ -1,7 +1,7 @@
 package com.baichen.rpc.provider;
 
 import com.baichen.rpc.api.Add;
-import com.baichen.rpc.register.ServiceRegisterConfig;
+import com.baichen.rpc.registry.ServiceRegistryConfig;
 
 /**
  * RPC 服务端启动入口
@@ -9,10 +9,14 @@ import com.baichen.rpc.register.ServiceRegisterConfig;
 public class ProviderApp {
     public static void main(String[] args) throws Exception {
         // 启动 RPC 服务端，监听 8085 端口
-        ServiceRegisterConfig serviceRegisterConfig = new ServiceRegisterConfig();
-        serviceRegisterConfig.setRegisterType("zookeeper");
-        serviceRegisterConfig.setConnectString("127.0.0.1:2181");
-        ProviderServer providerServer = new ProviderServer("127.0.0.1", 9091, serviceRegisterConfig);
+        ServiceRegistryConfig serviceRegistryConfig = new ServiceRegistryConfig();
+        serviceRegistryConfig.setRegistryType("zookeeper");
+        serviceRegistryConfig.setConnectString("127.0.0.1:2181");
+        ProviderProperties providerProperties = new ProviderProperties();
+        providerProperties.setServiceRegistryConfig(serviceRegistryConfig);
+        providerProperties.setHost("127.0.0.1");
+        providerProperties.setPort(9091);
+        ProviderServer providerServer = new ProviderServer(providerProperties);
         providerServer.register(Add.class, new AddImpl());
         providerServer.start();
     }

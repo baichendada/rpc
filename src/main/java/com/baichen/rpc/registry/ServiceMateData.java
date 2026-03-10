@@ -1,4 +1,4 @@
-package com.baichen.rpc.register;
+package com.baichen.rpc.registry;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

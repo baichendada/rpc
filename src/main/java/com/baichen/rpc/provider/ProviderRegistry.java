@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * 为什么要这个注册类呢？因为在我们的协议中，调用方法是由调用者的服务名称和方法名称来定位的
  * 为了避免调用者误调用接口实现类中其他我们不想要暴漏的方法，我们需要一个注册类来在服务提供类中进行拦截，只有被注册的方法才会被暴漏给调用者
  */
-public class ProviderRegister {
+public class ProviderRegistry {
 
     private final Map<String, InvokerInstance<?>> invokerMap = new ConcurrentHashMap<>();
 

@@ -27,22 +27,23 @@ src/main/java/com/baichen/rpc/
 │   └── ResponseEncoder.java  # 响应编码器
 ├── provider/           # 服务端
 │   ├── ProviderServer.java   # RPC 服务端
-│   ├── ProviderRegister.java # 服务注册表
+│   ├── ProviderRegistry.java # 服务注册表
+│   ├── ProviderProperties.java # 服务端配置
 │   ├── AddImpl.java          # 服务实现类
 │   └── ProviderApp.java     # 服务端启动入口
 └── consumer/           # 客户端
-    ├── Consumer.java        # RPC 客户端（实现服务接口）
     ├── ConsumerProxyFactory.java  # 动态代理工厂
+    ├── ConsumerProperties.java # 客户端配置
     └── ConsumerApp.java    # 客户端启动入口
 └── exception/          # 异常处理
     └── RpcException.java   # RPC 异常
-└── register/         # 服务注册与发现
-    ├── ServiceRegister.java       # 服务注册接口
-    ├── ServiceRegisterConfig.java # 注册中心配置
+└── registry/         # 服务注册与发现
+    ├── ServiceRegistry.java       # 服务注册接口
+    ├── ServiceRegistryConfig.java # 注册中心配置
     ├── ServiceMateData.java       # 服务元数据
-    ├── DefaultServiceRegister.java # 注册中心代理（缓存容错）
-    ├── ZookeeperServiceRegister.java # Zookeeper实现
-    └── RedisServiceRegister.java  # Redis实现（未完成）
+    ├── DefaultServiceRegistry.java # 注册中心代理（缓存容错）
+    ├── ZookeeperServiceRegistry.java # Zookeeper实现
+    └── RedisServiceRegistry.java  # Redis实现（未完成）
 ```
 
 ## 通信协议
@@ -121,11 +122,11 @@ RPC 服务端启动成功，监听端口: 8085
 ## 工作原理
 
 ### 服务注册
-- ProviderServer 通过 ProviderRegister 注册服务实现
+- ProviderServer 通过 ProviderRegistry 注册服务实现
 - 服务注册时保存接口类和方法反射调用的映射
 
 ### RPC 调用流程
-1. Consumer（实现服务接口 Add）发起调用
+1. ConsumerProxyFactory 创建动态代理，发起调用
 2. 构建 Request 对象（包含服务名、方法名、参数类型、参数值）
 3. 通过 Netty 发送到 ProviderServer
 4. ProviderServer 根据服务名从注册表查找服务实例
@@ -136,10 +137,11 @@ RPC 服务端启动成功，监听端口: 8085
 
 | 类 | 职责 |
 |---|---|
-| ProviderRegister | 服务注册表，管理接口与服务实例的映射 |
+| ProviderRegistry | 服务注册表，管理接口与服务实例的映射 |
 | InvokerInstance | 封装服务实例和接口类，通过反射调用方法 |
-| Consumer | 客户端代理，实现服务接口，发起 RPC 调用 |
 | ConsumerProxyFactory | 动态代理工厂，通过 Java 动态代理透明化 RPC 调用 |
+| ConsumerProperties | 客户端配置（线程数、超时时间等） |
+| ProviderProperties | 服务端配置（主机、端口、注册中心等） |
 
 ## 当前版本功能
 

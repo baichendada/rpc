@@ -1,4 +1,4 @@
-package com.baichen.rpc.register;
+package com.baichen.rpc.registry;
 
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
@@ -10,7 +10,7 @@ import org.apache.curator.x.discovery.details.JsonInstanceSerializer;
 
 import java.util.List;
 
-public class ZookeeperServiceRegister implements ServiceRegister {
+public class ZookeeperServiceRegistry implements ServiceRegistry {
 
     private static final String BASE_PATH = "/rpc";
 
@@ -19,7 +19,7 @@ public class ZookeeperServiceRegister implements ServiceRegister {
     private ServiceDiscovery<ServiceMateData> serviceDiscovery;
 
     @Override
-    public void init(ServiceRegisterConfig config) throws Exception {
+    public void init(ServiceRegistryConfig config) throws Exception {
         client = CuratorFrameworkFactory.builder()
                 .connectString(config.getConnectString())
                 .sessionTimeoutMs(60000)
@@ -37,7 +37,7 @@ public class ZookeeperServiceRegister implements ServiceRegister {
     }
 
     @Override
-    public void register(ServiceMateData mateData) throws Exception {
+    public void registry(ServiceMateData mateData) throws Exception {
         ServiceInstance<ServiceMateData> serviceInstance = ServiceInstance.<ServiceMateData>builder()
                 .address(mateData.getServiceName())
                 .port(mateData.getPort())

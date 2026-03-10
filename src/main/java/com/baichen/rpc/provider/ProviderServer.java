@@ -4,10 +4,10 @@ import com.baichen.rpc.codec.MessageDecoder;
 import com.baichen.rpc.codec.ResponseEncoder;
 import com.baichen.rpc.message.Request;
 import com.baichen.rpc.message.Response;
-import com.baichen.rpc.register.DefaultServiceRegister;
-import com.baichen.rpc.register.ServiceMateData;
-import com.baichen.rpc.register.ServiceRegister;
-import com.baichen.rpc.register.ServiceRegisterConfig;
+import com.baichen.rpc.registry.DefaultServiceRegistry;
+import com.baichen.rpc.registry.ServiceMateData;
+import com.baichen.rpc.registry.ServiceRegistry;
+import com.baichen.rpc.registry.ServiceRegistryConfig;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -28,6 +28,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ProviderServer {
 
+    private final ProviderProperties properties;
+
     /**
      * 服务主机地址
      */
@@ -38,7 +40,7 @@ public class ProviderServer {
      */
     private final int port;
 
-    private final ProviderRegister providerRegister;
+    private final ProviderRegistry providerRegistry;
 
     /**
      * Boss 事件循环组，负责处理 Accept 事件
@@ -50,14 +52,15 @@ public class ProviderServer {
      */
     private EventLoopGroup workerEventGroup;
 
-    private ServiceRegister serviceRegister;
+    private ServiceRegistry serviceRegistry;
 
-    ProviderServer(String host, int port, ServiceRegisterConfig config) throws Exception {
-        this.host = host;
-        this.port = port;
-        this.providerRegister = new ProviderRegister();
-        this.serviceRegister = new DefaultServiceRegister(config);
-        this.serviceRegister.init(config);
+    ProviderServer(ProviderProperties properties) throws Exception {
+        this.host = properties.getHost();
+        this.port = properties.getPort();
+        this.providerRegistry = new ProviderRegistry();
+        this.serviceRegistry = new DefaultServiceRegistry(properties.getServiceRegistryConfig());
+        this.serviceRegistry.init(properties.getServiceRegistryConfig());
+        this.properties = properties;
     }
 
     /**
@@ -71,7 +74,7 @@ public class ProviderServer {
             // bossEventGroup: 1 个线程处理连接Accept
             // workerEventGroup: 4 个线程处理 IO 读写
             bossEventGroup = new NioEventLoopGroup();
-            workerEventGroup = new NioEventLoopGroup(4);
+            workerEventGroup = new NioEventLoopGroup(properties.getWorkerThreadNum());
 
             bs.group(bossEventGroup, workerEventGroup)
                     .channel(NioServerSocketChannel.class)
@@ -93,11 +96,11 @@ public class ProviderServer {
             log.info("RPC 服务端启动成功，监听端口: {}", port);
 
             // 将注册的接口信息注册到服务注册中心
-            providerRegister.getAllServiceNames().stream()
+            providerRegistry.getAllServiceNames().stream()
                     .map(name -> new ServiceMateData(name, host, port))
                     .forEach(data -> {
                         try {
-                            serviceRegister.register(data);
+                            serviceRegistry.registry(data);
                         } catch (Exception e) {
                             throw new RuntimeException(e);
                         }
@@ -112,7 +115,7 @@ public class ProviderServer {
     }
 
     public <I> void register(Class<I> iClass, I instance) {
-        providerRegister.register(iClass, instance);
+        providerRegistry.register(iClass, instance);
     }
 
     /**
@@ -135,7 +138,7 @@ public class ProviderServer {
             log.info("收到请求: {}", req);
 
             // 根据入参，从注册表中查找对应的服务实例并调用
-            ProviderRegister.InvokerInstance<?> invokerInstance = providerRegister.findInvokerInstance(req.getServiceName());
+            ProviderRegistry.InvokerInstance<?> invokerInstance = providerRegistry.findInvokerInstance(req.getServiceName());
             if (invokerInstance == null) {
                 log.error("未找到服务实例: {}", req.getServiceName());
                 Response response = Response.fail("服务未找到: " + req.getServiceName(), req.getRequestId());;

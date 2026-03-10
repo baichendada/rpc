@@ -5,10 +5,10 @@ import com.baichen.rpc.codec.RequestEncoder;
 import com.baichen.rpc.exception.RpcException;
 import com.baichen.rpc.message.Request;
 import com.baichen.rpc.message.Response;
-import com.baichen.rpc.register.DefaultServiceRegister;
-import com.baichen.rpc.register.ServiceMateData;
-import com.baichen.rpc.register.ServiceRegister;
-import com.baichen.rpc.register.ServiceRegisterConfig;
+import com.baichen.rpc.registry.DefaultServiceRegistry;
+import com.baichen.rpc.registry.ServiceMateData;
+import com.baichen.rpc.registry.ServiceRegistry;
+import com.baichen.rpc.registry.ServiceRegistryConfig;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -34,19 +34,24 @@ public class ConsumerProxyFactory {
     // 用于维护正在等待响应的请求，key为请求ID，value为对应的 CompletableFuture
     private static final Map<Integer, CompletableFuture<Response>> IN_FLIGHT_REQUEST_MAP = new ConcurrentHashMap<>();
 
-    private final ConnectionManager connectionManager = new ConnectionManager(createBootStrap());
+    private ConnectionManager connectionManager;
 
-    private final ServiceRegister serviceRegister;
+    private final ServiceRegistry serviceRegistry;
 
-    public ConsumerProxyFactory(ServiceRegisterConfig serviceRegisterConfig) throws Exception {
-        this.serviceRegister = new DefaultServiceRegister(serviceRegisterConfig);
-        this.serviceRegister.init(serviceRegisterConfig);
+    private final ConsumerProperties properties;
+
+    public ConsumerProxyFactory(ConsumerProperties properties) throws Exception {
+        this.properties = properties;
+        this.connectionManager = new ConnectionManager(createBootStrap());
+        this.serviceRegistry = new DefaultServiceRegistry(properties.getServiceRegistryConfig());
+        this.serviceRegistry.init(properties.getServiceRegistryConfig());
     }
 
     private Bootstrap createBootStrap() {
         Bootstrap bootstrap = new Bootstrap();
-        bootstrap.group(new NioEventLoopGroup(4))
+        bootstrap.group(new NioEventLoopGroup(properties.getWorkerThreadNum()))
                 .channel(NioSocketChannel.class)
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, properties.getConnectTimeoutMillis())
                 .handler(new ChannelInitializer<NioSocketChannel>() {
                     @Override
                     protected void initChannel(NioSocketChannel channel) throws Exception {
@@ -84,68 +89,119 @@ public class ConsumerProxyFactory {
 
     @SuppressWarnings("unchecked")
     public <I> I createConsumerProxy(Class<I> interfaceClass) {
-        return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(), new Class[]{interfaceClass}, new InvocationHandler() {
-            @Override
-            public Object invoke(Object proxy, Method method, Object[] args) {
-                if (proxy.getClass().getDeclaringClass() == Object.class) {
-                    if (method.getName().equals("toString")) {
-                        return "ConsumerProxy for " + interfaceClass.getName();
-                    } else if (method.getName().equals("hashCode")) {
-                        return System.identityHashCode(proxy);
-                    } else if (method.getName().equals("equals")) {
-                        return proxy == args[0];
-                    }
-                    throw new UnsupportedOperationException(method.getName());
-                }
+        return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(), new Class[]{interfaceClass}
+                , new ConsumerInvocationHandler(interfaceClass));
+    }
 
-                try {
-                    // 用于接收服务端响应的 CompletableFuture
-                    CompletableFuture<Response> future = new CompletableFuture<>();
+    private class ConsumerInvocationHandler implements InvocationHandler {
 
-                    // 从注册中心中查找对应接口的服务信息
-                    List<ServiceMateData> serviceMateDataList = serviceRegister.fetchSeviceList(interfaceClass.getName());
-                    if (serviceMateDataList == null || serviceMateDataList.isEmpty()) {
-                        throw new RpcException("未找到服务 " + interfaceClass.getName() + " 的注册信息");
-                    }
+        private final Class<?> interfaceClass;
 
-                    // 连接到服务端
-                    // todo: 这里我们先简单的取第一个服务信息进行连接，后续可以改成负载均衡的方式来选择服务信息进行连接
-                    ServiceMateData serviceMateData = serviceMateDataList.get(0);
-                    Channel channel = connectionManager.getChannel(serviceMateData.getHost(), serviceMateData.getPort());
-                    if (channel == null) {
-                        throw new RpcException("无法连接到服务端，host: localhost, port: 8085");
-                    }
+        private ConsumerInvocationHandler(Class<?> interfaceClass) {
+            this.interfaceClass = interfaceClass;
+        }
 
-                    // 构建 RPC 请求
-                    Request request = new Request();
-                    request.setServiceName(interfaceClass.getName());
-                    request.setMethodName(method.getName());
-                    request.setParamsClass(method.getParameterTypes());
-                    request.setParams(args);
-
-                    IN_FLIGHT_REQUEST_MAP.putIfAbsent(request.getRequestId(), future);
-
-                    // 发送请求
-                    channel.writeAndFlush(request).addListener(f -> {
-                                if (!f.isSuccess()) {
-                                    IN_FLIGHT_REQUEST_MAP.remove(request.getRequestId());
-                                    // 如果发送失败了，说明可能是网络问题或者服务端不可用，这时候我们应该抛出异常让调用者知道调用失败了，而不是一直等待响应
-                                    future.completeExceptionally(f.cause());
-                                }
-                            }
-                    );
-
-                    Response resp = future.get(3, TimeUnit.SECONDS);
-                    if (Response.ResponseCode.SUCCESS.getCode() == resp.getCode()) {
-                        return resp.getResult();
-                    }
-                    throw new RpcException("RPC 调用失败，错误信息: " + resp);
-                } catch (RpcException e) {
-                    throw e;
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            // 处理 Object 方法（toString, hashCode, equals）
+            if (proxy.getClass().getDeclaringClass() == Object.class) {
+                return handleObjectMethod(proxy, method, args);
             }
-        });
+
+            // 执行 RPC 调用
+            return invokeRemote(method, args);
+        }
+
+        /**
+         * 处理 Object 类的方法
+         */
+        private Object handleObjectMethod(Object proxy, Method method, Object[] args) {
+            return switch (method.getName()) {
+                case "toString" -> "ConsumerProxy for " + interfaceClass.getName();
+                case "hashCode" -> System.identityHashCode(proxy);
+                case "equals" -> proxy == args[0];
+                default -> throw new UnsupportedOperationException(method.getName());
+            };
+        }
+
+        /**
+         * 执行远程 RPC 调用
+         */
+        private Object invokeRemote(Method method, Object[] args) throws Exception {
+            CompletableFuture<Response> future = new CompletableFuture<>();
+
+            // 1. 从注册中心获取服务地址
+            ServiceMateData service = getServiceFromRegistry();
+
+            // 2. 获取连接通道
+            Channel channel = getChannel(service);
+
+            // 3. 构建并发送请求
+            Request request = buildRequest(method, args);
+            sendRequest(channel, request, future);
+
+            // 4. 等待响应并返回结果
+            return waitResponse(future);
+        }
+
+        /**
+         * 从注册中心获取服务信息
+         */
+        private ServiceMateData getServiceFromRegistry() throws Exception {
+            List<ServiceMateData> serviceMateDataList = serviceRegistry.fetchSeviceList(interfaceClass.getName());
+            if (serviceMateDataList == null || serviceMateDataList.isEmpty()) {
+                throw new RpcException("未找到服务 " + interfaceClass.getName() + " 的注册信息");
+            }
+            // todo: 后续可改为负载均衡选择服务
+            return serviceMateDataList.get(0);
+        }
+
+        /**
+         * 获取与服务端的通道连接
+         */
+        private Channel getChannel(ServiceMateData service) {
+            Channel channel = connectionManager.getChannel(service.getHost(), service.getPort());
+            if (channel == null) {
+                throw new RpcException("无法连接到服务端，host: " + service.getHost() + ", port: " + service.getPort());
+            }
+            return channel;
+        }
+
+        /**
+         * 构建 RPC 请求
+         */
+        private Request buildRequest(Method method, Object[] args) {
+            Request request = new Request();
+            request.setServiceName(interfaceClass.getName());
+            request.setMethodName(method.getName());
+            request.setParamsClass(method.getParameterTypes());
+            request.setParams(args);
+            return request;
+        }
+
+        /**
+         * 发送 RPC 请求
+         */
+        private void sendRequest(Channel channel, Request request, CompletableFuture<Response> future) throws Exception {
+            IN_FLIGHT_REQUEST_MAP.putIfAbsent(request.getRequestId(), future);
+
+            channel.writeAndFlush(request).addListener(f -> {
+                if (!f.isSuccess()) {
+                    IN_FLIGHT_REQUEST_MAP.remove(request.getRequestId());
+                    future.completeExceptionally(f.cause());
+                }
+            });
+        }
+
+        /**
+         * 等待并处理响应
+         */
+        private Object waitResponse(CompletableFuture<Response> future) throws Exception {
+            Response resp = future.get(properties.getWaitResponseTimeoutMillis(), TimeUnit.MILLISECONDS);
+            if (Response.ResponseCode.SUCCESS.getCode() == resp.getCode()) {
+                return resp.getResult();
+            }
+            throw new RpcException("RPC 调用失败，错误信息: " + resp);
+        }
     }
 }

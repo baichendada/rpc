@@ -4,13 +4,16 @@
 
 ### 新增功能
 - **Zookeeper 服务注册中心**：基于 Curator 框架实现服务发现
-- **服务注册接口**：新增 `ServiceRegister` 接口及配置类
+- **服务注册接口**：新增 `ServiceRegistry` 接口及配置类
 - **服务元数据**：`ServiceMateData` 存储服务名、主机、端口信息
+- **配置类**：新增 `ConsumerProperties` 和 `ProviderProperties` 配置类
 
 ### 代码优化
 - **动态服务发现**：Consumer 从注册中心获取服务地址，而非硬编码
-- **缓存容错**：`DefaultServiceRegister` 本地缓存，注册中心不可用时使用缓存
+- **缓存容错**：`DefaultServiceRegistry` 本地缓存，注册中心不可用时使用缓存
 - **服务注册自动化**：ProviderServer 启动时自动注册服务
+- **代码重构**：拆分 `ConsumerProxyFactory.invoke()` 为多个私有方法
+- **命名规范**：统一使用 `Registry` 替代 `Register`
 
 ### 依赖更新
 - 新增 `curator-x-discovery 5.9.0` 依赖
