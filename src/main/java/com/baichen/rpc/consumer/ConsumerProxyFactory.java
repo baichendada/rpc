@@ -3,6 +3,9 @@ package com.baichen.rpc.consumer;
 import com.baichen.rpc.codec.MessageDecoder;
 import com.baichen.rpc.codec.RequestEncoder;
 import com.baichen.rpc.exception.RpcException;
+import com.baichen.rpc.loaderbalance.LoaderBalancer;
+import com.baichen.rpc.loaderbalance.RandomLoaderBalancer;
+import com.baichen.rpc.loaderbalance.RoundRobinLoaderBalancer;
 import com.baichen.rpc.message.Request;
 import com.baichen.rpc.message.Response;
 import com.baichen.rpc.registry.DefaultServiceRegistry;
@@ -40,11 +43,14 @@ public class ConsumerProxyFactory {
 
     private final ConsumerProperties properties;
 
+    private final LoaderBalancer balancer;
+
     public ConsumerProxyFactory(ConsumerProperties properties) throws Exception {
         this.properties = properties;
         this.connectionManager = new ConnectionManager(createBootStrap());
         this.serviceRegistry = new DefaultServiceRegistry(properties.getServiceRegistryConfig());
         this.serviceRegistry.init(properties.getServiceRegistryConfig());
+        this.balancer = createLoaderBalancer(properties.getLoadBalancePolicy());
     }
 
     private Bootstrap createBootStrap() {
@@ -61,19 +67,7 @@ public class ConsumerProxyFactory {
                                 // 2. 编码器：编码请求消息
                                 .addLast(new RequestEncoder())
                                 // 3. 业务处理器：处理服务端响应
-                                .addLast(new SimpleChannelInboundHandler<Response>() {
-                                    @Override
-                                    protected void channelRead0(ChannelHandlerContext ctx, Response resp) throws Exception {
-                                        CompletableFuture<Response> resultFuture = IN_FLIGHT_REQUEST_MAP.remove(resp.getRequestId());
-                                        if (resultFuture == null) {
-                                            log.warn("未找到对应的请求，requestId: {}", resp.getRequestId());
-                                            return;
-                                        }
-                                        // 打印收到的响应
-                                        log.info("收到响应: {}", resp);
-                                        resultFuture.complete(resp);
-                                    }
-                                })
+                                .addLast(new ConsumerChannelHandler())
                                 // 4. 调试用：捕获未处理的消息
                                 .addLast(new ChannelInboundHandlerAdapter() {
                                     @Override
@@ -87,18 +81,63 @@ public class ConsumerProxyFactory {
         return bootstrap;
     }
 
+    private static class ConsumerChannelHandler extends SimpleChannelInboundHandler<Response> {
+        @Override
+        protected void channelRead0(ChannelHandlerContext ctx, Response resp) throws Exception {
+            CompletableFuture<Response> resultFuture = IN_FLIGHT_REQUEST_MAP.remove(resp.getRequestId());
+            if (resultFuture == null) {
+                log.warn("未找到对应的请求，requestId: {}", resp.getRequestId());
+                return;
+            }
+            // 打印收到的响应
+            log.info("收到响应: {}", resp);
+            resultFuture.complete(resp);
+        }
+
+        @Override
+        public void channelActive(ChannelHandlerContext ctx) throws Exception {
+            log.info("channel active: {}", ctx.channel().remoteAddress());
+        }
+
+        @Override
+        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+            log.info("channel inactive: {}", ctx.channel().remoteAddress());
+        }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+            log.error("channel exception: {}", cause.getMessage());
+            ctx.close();
+        }
+    }
+
     @SuppressWarnings("unchecked")
     public <I> I createConsumerProxy(Class<I> interfaceClass) {
         return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(), new Class[]{interfaceClass}
-                , new ConsumerInvocationHandler(interfaceClass));
+                , new ConsumerInvocationHandler(interfaceClass, balancer));
+    }
+
+    private LoaderBalancer createLoaderBalancer(String loadBalancePolicy) {
+        switch (loadBalancePolicy) {
+            case "random" -> {
+                return new RandomLoaderBalancer();
+            }
+            case "roundRobin" -> {
+                return new RoundRobinLoaderBalancer();
+            }
+            default -> throw new IllegalArgumentException("Unsupported load balance policy: " + loadBalancePolicy);
+        }
     }
 
     private class ConsumerInvocationHandler implements InvocationHandler {
 
         private final Class<?> interfaceClass;
 
-        private ConsumerInvocationHandler(Class<?> interfaceClass) {
+        private final LoaderBalancer balancer;
+
+        private ConsumerInvocationHandler(Class<?> interfaceClass, LoaderBalancer balancer) {
             this.interfaceClass = interfaceClass;
+            this.balancer = balancer;
         }
 
         @Override
@@ -149,11 +188,11 @@ public class ConsumerProxyFactory {
          */
         private ServiceMateData getServiceFromRegistry() throws Exception {
             List<ServiceMateData> serviceMateDataList = serviceRegistry.fetchSeviceList(interfaceClass.getName());
+            log.info("从注册中心获取到服务列表: {}", serviceMateDataList);
             if (serviceMateDataList == null || serviceMateDataList.isEmpty()) {
                 throw new RpcException("未找到服务 " + interfaceClass.getName() + " 的注册信息");
             }
-            // todo: 后续可改为负载均衡选择服务
-            return serviceMateDataList.get(0);
+            return balancer.select(serviceMateDataList);
         }
 
         /**

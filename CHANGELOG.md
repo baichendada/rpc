@@ -1,5 +1,19 @@
 # 更新日志
 
+## [v0.7] - 2026-03-11
+
+### 新增功能
+- **负载均衡**：新增 `LoaderBalancer` 接口及实现类
+- **随机负载均衡**：`RandomLoaderBalancer` 随机选择服务节点
+- **轮询负载均衡**：`RoundRobinLoaderBalancer` 轮询选择服务节点
+
+### 代码优化
+- **配置化负载均衡**：通过 `ConsumerProperties.loadBalancePolicy` 配置负载均衡策略
+- **Balancer 实例共享**：将 LoaderBalancer 提升为 Factory 实例变量，确保多代理共享计数器
+- **Handler 抽离**：将匿名内部类改为具名类 `ConsumerChannelHandler`
+
+---
+
 ## [v0.6] - 2026-03-11
 
 ### 新增功能

@@ -44,6 +44,16 @@ src/main/java/com/baichen/rpc/
     ├── DefaultServiceRegistry.java # 注册中心代理（缓存容错）
     ├── ZookeeperServiceRegistry.java # Zookeeper实现
     └── RedisServiceRegistry.java  # Redis实现（未完成）
+└── loaderbalance/    # 负载均衡
+    ├── LoaderBalancer.java        # 负载均衡接口
+    ├── RandomLoaderBalancer.java  # 随机负载均衡
+    └── RoundRobinLoaderBalancer.java # 轮询负载均衡
+    ├── ServiceRegistry.java       # 服务注册接口
+    ├── ServiceRegistryConfig.java # 注册中心配置
+    ├── ServiceMateData.java       # 服务元数据
+    ├── DefaultServiceRegistry.java # 注册中心代理（缓存容错）
+    ├── ZookeeperServiceRegistry.java # Zookeeper实现
+    └── RedisServiceRegistry.java  # Redis实现（未完成）
 ```
 
 ## 通信协议
@@ -157,10 +167,10 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] 连接池管理
 - [x] 动态代理支持
 - [x] 服务注册中心（支持 Zookeeper/Redis）
+- [x] 负载均衡（随机、轮询）
 
 ## 待完善功能
 
-- [ ] 负载均衡
 - [ ] 重试机制
 - [ ] 多种序列化方式（Hessian、Protobuf）
 - [ ] 服务治理（熔断、限流）
