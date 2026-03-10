@@ -4,6 +4,10 @@ import com.baichen.rpc.codec.MessageDecoder;
 import com.baichen.rpc.codec.ResponseEncoder;
 import com.baichen.rpc.message.Request;
 import com.baichen.rpc.message.Response;
+import com.baichen.rpc.register.DefaultServiceRegister;
+import com.baichen.rpc.register.ServiceMateData;
+import com.baichen.rpc.register.ServiceRegister;
+import com.baichen.rpc.register.ServiceRegisterConfig;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -25,6 +29,11 @@ import lombok.extern.slf4j.Slf4j;
 public class ProviderServer {
 
     /**
+     * 服务主机地址
+     */
+    private final String host;
+
+    /**
      * 服务端口
      */
     private final int port;
@@ -41,9 +50,14 @@ public class ProviderServer {
      */
     private EventLoopGroup workerEventGroup;
 
-    ProviderServer(int port) {
+    private ServiceRegister serviceRegister;
+
+    ProviderServer(String host, int port, ServiceRegisterConfig config) throws Exception {
+        this.host = host;
         this.port = port;
         this.providerRegister = new ProviderRegister();
+        this.serviceRegister = new DefaultServiceRegister(config);
+        this.serviceRegister.init(config);
     }
 
     /**
@@ -77,6 +91,17 @@ public class ProviderServer {
             // 绑定端口并启动服务
             ChannelFuture channelFuture = bs.bind(port).sync();
             log.info("RPC 服务端启动成功，监听端口: {}", port);
+
+            // 将注册的接口信息注册到服务注册中心
+            providerRegister.getAllServiceNames().stream()
+                    .map(name -> new ServiceMateData(name, host, port))
+                    .forEach(data -> {
+                        try {
+                            serviceRegister.register(data);
+                        } catch (Exception e) {
+                            throw new RuntimeException(e);
+                        }
+                    });
 
             // 阻塞等待服务端关闭
             channelFuture.channel().closeFuture().sync();

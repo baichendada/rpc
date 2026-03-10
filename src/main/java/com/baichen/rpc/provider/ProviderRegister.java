@@ -1,6 +1,8 @@
 package com.baichen.rpc.provider;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -13,6 +15,10 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ProviderRegister {
 
     private final Map<String, InvokerInstance<?>> invokerMap = new ConcurrentHashMap<>();
+
+    public List<String> getAllServiceNames() {
+        return new ArrayList<>(invokerMap.keySet());
+    }
 
     public <I> void register(Class<I> interfaceClass, I invokerInstance) {
         if (!interfaceClass.isInterface()) {

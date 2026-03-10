@@ -1,11 +1,14 @@
 package com.baichen.rpc.consumer;
 
-import com.baichen.rpc.api.Add;
 import com.baichen.rpc.codec.MessageDecoder;
 import com.baichen.rpc.codec.RequestEncoder;
 import com.baichen.rpc.exception.RpcException;
 import com.baichen.rpc.message.Request;
 import com.baichen.rpc.message.Response;
+import com.baichen.rpc.register.DefaultServiceRegister;
+import com.baichen.rpc.register.ServiceMateData;
+import com.baichen.rpc.register.ServiceRegister;
+import com.baichen.rpc.register.ServiceRegisterConfig;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -15,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -31,6 +35,13 @@ public class ConsumerProxyFactory {
     private static final Map<Integer, CompletableFuture<Response>> IN_FLIGHT_REQUEST_MAP = new ConcurrentHashMap<>();
 
     private final ConnectionManager connectionManager = new ConnectionManager(createBootStrap());
+
+    private final ServiceRegister serviceRegister;
+
+    public ConsumerProxyFactory(ServiceRegisterConfig serviceRegisterConfig) throws Exception {
+        this.serviceRegister = new DefaultServiceRegister(serviceRegisterConfig);
+        this.serviceRegister.init(serviceRegisterConfig);
+    }
 
     private Bootstrap createBootStrap() {
         Bootstrap bootstrap = new Bootstrap();
@@ -91,8 +102,16 @@ public class ConsumerProxyFactory {
                     // 用于接收服务端响应的 CompletableFuture
                     CompletableFuture<Response> future = new CompletableFuture<>();
 
+                    // 从注册中心中查找对应接口的服务信息
+                    List<ServiceMateData> serviceMateDataList = serviceRegister.fetchSeviceList(interfaceClass.getName());
+                    if (serviceMateDataList == null || serviceMateDataList.isEmpty()) {
+                        throw new RpcException("未找到服务 " + interfaceClass.getName() + " 的注册信息");
+                    }
+
                     // 连接到服务端
-                    Channel channel = connectionManager.getChannel("localhost", 8085);
+                    // todo: 这里我们先简单的取第一个服务信息进行连接，后续可以改成负载均衡的方式来选择服务信息进行连接
+                    ServiceMateData serviceMateData = serviceMateDataList.get(0);
+                    Channel channel = connectionManager.getChannel(serviceMateData.getHost(), serviceMateData.getPort());
                     if (channel == null) {
                         throw new RpcException("无法连接到服务端，host: localhost, port: 8085");
                     }
@@ -104,10 +123,14 @@ public class ConsumerProxyFactory {
                     request.setParamsClass(method.getParameterTypes());
                     request.setParams(args);
 
+                    IN_FLIGHT_REQUEST_MAP.putIfAbsent(request.getRequestId(), future);
+
                     // 发送请求
                     channel.writeAndFlush(request).addListener(f -> {
-                                if (f.isSuccess()) {
-                                    IN_FLIGHT_REQUEST_MAP.putIfAbsent(request.getRequestId(), future);
+                                if (!f.isSuccess()) {
+                                    IN_FLIGHT_REQUEST_MAP.remove(request.getRequestId());
+                                    // 如果发送失败了，说明可能是网络问题或者服务端不可用，这时候我们应该抛出异常让调用者知道调用失败了，而不是一直等待响应
+                                    future.completeExceptionally(f.cause());
                                 }
                             }
                     );

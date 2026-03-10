@@ -9,6 +9,7 @@
 - **FastJSON2** - JSON 序列化/反序列化
 - **Lombok** - 简化代码
 - **Logback** - 日志框架
+- **Curator** - Zookeeper 服务发现框架
 
 ## 项目结构
 
@@ -35,6 +36,13 @@ src/main/java/com/baichen/rpc/
     └── ConsumerApp.java    # 客户端启动入口
 └── exception/          # 异常处理
     └── RpcException.java   # RPC 异常
+└── register/         # 服务注册与发现
+    ├── ServiceRegister.java       # 服务注册接口
+    ├── ServiceRegisterConfig.java # 注册中心配置
+    ├── ServiceMateData.java       # 服务元数据
+    ├── DefaultServiceRegister.java # 注册中心代理（缓存容错）
+    ├── ZookeeperServiceRegister.java # Zookeeper实现
+    └── RedisServiceRegister.java  # Redis实现（未完成）
 ```
 
 ## 通信协议
@@ -138,7 +146,7 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] 基于 Netty 的 NIO 通信
 - [x] 自定义二进制协议（魔数校验）
 - [x] JSON 序列化
-- [x] 服务注册与发现
+- [x] 服务注册与发现（Zookeeper）
 - [x] 反射调用服务端方法
 - [x] Logback 日志框架
 - [x] 响应码机制（成功/失败）
@@ -146,14 +154,15 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] 调用超时机制（3秒）
 - [x] 连接池管理
 - [x] 动态代理支持
+- [x] 服务注册中心（支持 Zookeeper/Redis）
 
 ## 待完善功能
 
-- [ ] 多种序列化方式（Hessian、Protobuf）
 - [ ] 负载均衡
 - [ ] 重试机制
-- [ ] 连接池
+- [ ] 多种序列化方式（Hessian、Protobuf）
 - [ ] 服务治理（熔断、限流）
+- [ ] Redis 注册中心实现
 
 ---
 

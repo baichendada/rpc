@@ -11,4 +11,6 @@
     </root>
 
     <logger name="com.baichen.rpc" level="INFO"/>
+    <logger name="io.netty" level="INFO"/>
+    <logger name="org.apache.zookeeper" level="WARN"/>
 </configuration>
