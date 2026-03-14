@@ -48,12 +48,12 @@ src/main/java/com/baichen/rpc/
     ├── LoaderBalancer.java        # 负载均衡接口
     ├── RandomLoaderBalancer.java  # 随机负载均衡
     └── RoundRobinLoaderBalancer.java # 轮询负载均衡
-    ├── ServiceRegistry.java       # 服务注册接口
-    ├── ServiceRegistryConfig.java # 注册中心配置
-    ├── ServiceMateData.java       # 服务元数据
-    ├── DefaultServiceRegistry.java # 注册中心代理（缓存容错）
-    ├── ZookeeperServiceRegistry.java # Zookeeper实现
-    └── RedisServiceRegistry.java  # Redis实现（未完成）
+├── retry/           # 重试机制
+    ├── RetryPolicy.java          # 重试策略接口
+    ├── RetryContext.java         # 重试上下文
+    ├── RetrySamePolicy.java      # 同一服务重试（指数退避）
+    ├── FailOverPolicy.java       # 故障转移重试
+    └── ForkAllPolicy.java        # 并行重试所有服务
 ```
 
 ## 通信协议
@@ -163,15 +163,15 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] Logback 日志框架
 - [x] 响应码机制（成功/失败）
 - [x] 错误处理与异常传递
-- [x] 调用超时机制（3秒）
+- [x] 调用超时机制
 - [x] 连接池管理
 - [x] 动态代理支持
 - [x] 服务注册中心（支持 Zookeeper/Redis）
 - [x] 负载均衡（随机、轮询）
+- [x] 重试机制（FailOver、RetrySame、ForkAll）
 
 ## 待完善功能
 
-- [ ] 重试机制
 - [ ] 多种序列化方式（Hessian、Protobuf）
 - [ ] 服务治理（熔断、限流）
 - [ ] Redis 注册中心实现

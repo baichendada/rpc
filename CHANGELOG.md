@@ -1,5 +1,27 @@
 # 更新日志
 
+## [v0.8] - 2026-03-15
+
+### 新增功能
+- **重试机制**：新增 `RetryPolicy` 接口及多种实现
+- **RetrySamePolicy**：同一服务重试，使用指数退避策略（100ms, 200ms, 400ms）
+- **FailOverPolicy**：故障转移重试，失败后尝试其他服务节点
+- **ForkAllPolicy**：并行重试所有服务，任一成功即返回
+- **RetryContext**：重试上下文，封装重试所需信息
+
+### 代码优化
+- **Consumer 客户端重构**：
+  - 使用 HashedWheelTimer 替代简单定时器，更高效的超时管理
+  - 新增 `callRpcAsync` 方法实现异步 RPC 调用
+  - 新增 `totalTimeoutMs` 总超时配置
+  - 新增 `retryPolicy` 重试策略配置
+- **FailOverPolicy 修复**：修复不可变列表导致 `UnsupportedOperationException` 的 bug
+
+### 依赖更新
+- 新增 `netty` 内置的 `HashedWheelTimer` 依赖
+
+---
+
 ## [v0.7] - 2026-03-11
 
 ### 新增功能

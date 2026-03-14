@@ -23,17 +23,21 @@ public class ConsumerApp {
 //            log.info("调用 add(1, 3) = {}", consumer.add(1, 3));
 //            log.info("调用 add(12, 3) = {}", consumer.add(12, 3));
 //        }
-        while (true) {
-            try {
-                Add consumer = consumerProxyFactory.createConsumerProxy(Add.class);
-                // 发起 RPC 调用
-                log.info("调用 add(1, 3) = {}", consumer.add(1, 3));
+//        while (true) {
+//            try {
+//                Add consumer = consumerProxyFactory.createConsumerProxy(Add.class);
+//                // 发起 RPC 调用
+//                log.info("调用 add(1, 3) = {}", consumer.add(1, 3));
+////                log.info("调用 add(12, 3) = {}", consumer.add(12, 3));
+//                Thread.sleep(1000);
+//            } catch (Exception e) {
+//                log.error("RPC 调用失败", e);
+//            }
+//
+//        }
+        Add consumer = consumerProxyFactory.createConsumerProxy(Add.class);
+        // 发起 RPC 调用
+        log.info("调用 add(1, 3) = {}", consumer.add(1, 3));
 //                log.info("调用 add(12, 3) = {}", consumer.add(12, 3));
-                Thread.sleep(1000);
-            } catch (Exception e) {
-                log.error("RPC 调用失败", e);
-            }
-
-        }
     }
 }

@@ -11,11 +11,13 @@ import com.baichen.rpc.message.Response;
 import com.baichen.rpc.registry.DefaultServiceRegistry;
 import com.baichen.rpc.registry.ServiceMateData;
 import com.baichen.rpc.registry.ServiceRegistry;
-import com.baichen.rpc.registry.ServiceRegistryConfig;
+import com.baichen.rpc.retry.*;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.util.HashedWheelTimer;
+import io.netty.util.Timeout;
 import lombok.extern.slf4j.Slf4j;
 
 import java.lang.reflect.InvocationHandler;
@@ -45,19 +47,25 @@ public class ConsumerProxyFactory {
 
     private final LoaderBalancer balancer;
 
+    private final RetryPolicy retryPolicy;
+
+    private final HashedWheelTimer hashedWheelTimer;
+
     public ConsumerProxyFactory(ConsumerProperties properties) throws Exception {
         this.properties = properties;
         this.connectionManager = new ConnectionManager(createBootStrap());
         this.serviceRegistry = new DefaultServiceRegistry(properties.getServiceRegistryConfig());
         this.serviceRegistry.init(properties.getServiceRegistryConfig());
         this.balancer = createLoaderBalancer(properties.getLoadBalancePolicy());
+        this.retryPolicy = createRetryPolicy(properties.getRetryPolicy());
+        this.hashedWheelTimer = new HashedWheelTimer(1, TimeUnit.SECONDS, 64);
     }
 
     private Bootstrap createBootStrap() {
         Bootstrap bootstrap = new Bootstrap();
         bootstrap.group(new NioEventLoopGroup(properties.getWorkerThreadNum()))
                 .channel(NioSocketChannel.class)
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, properties.getConnectTimeoutMillis())
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, properties.getConnectTimeoutMs())
                 .handler(new ChannelInitializer<NioSocketChannel>() {
                     @Override
                     protected void initChannel(NioSocketChannel channel) throws Exception {
@@ -129,6 +137,22 @@ public class ConsumerProxyFactory {
         }
     }
 
+    private RetryPolicy createRetryPolicy(String retryPolicy) {
+        switch (retryPolicy) {
+            case "retrySame" -> {
+                return new RetrySamePolicy();
+            }
+            case "failOver" -> {
+                return new FailOverPolicy();
+            }
+            case "forkAll" -> {
+                return new ForkAllPolicy();
+            }
+            default -> throw new IllegalArgumentException("Unsupported retry policy: " + retryPolicy);
+        }
+    }
+
+
     private class ConsumerInvocationHandler implements InvocationHandler {
 
         private final Class<?> interfaceClass;
@@ -167,20 +191,74 @@ public class ConsumerProxyFactory {
          * 执行远程 RPC 调用
          */
         private Object invokeRemote(Method method, Object[] args) throws Exception {
-            CompletableFuture<Response> future = new CompletableFuture<>();
 
-            // 1. 从注册中心获取服务地址
+            long startTime = System.currentTimeMillis();
+            // 从注册中心获取服务地址
             ServiceMateData service = getServiceFromRegistry();
 
-            // 2. 获取连接通道
-            Channel channel = getChannel(service);
-
-            // 3. 构建并发送请求
+            // 构建并发送请求
             Request request = buildRequest(method, args);
-            sendRequest(channel, request, future);
+            try {
+                CompletableFuture<Response> future = callRpcAsync(request, service);
+                // 等待响应并返回结果
+                return future.get(properties.getWaitResponseTimeoutMs(), TimeUnit.MILLISECONDS).getResult();
+            } catch (Exception e) {
+                if (System.currentTimeMillis() - startTime >= properties.getTotalTimeoutMs()) {
+                    throw e;
+                }
+                // 遇到异常情况重试
+                RetryContext context = new RetryContext();
+                context.setFailedService(service);
+                context.setRetryList(serviceRegistry.fetchSeviceList(interfaceClass.getName()));
+                context.setLoaderBalancer(balancer);
+                context.setWaitResponseTimeoutMillis(properties.getWaitResponseTimeoutMs());
+                context.setTotalTimeoutMs(properties.getTotalTimeoutMs() - (System.currentTimeMillis() - startTime));
+                context.setRetryFunction(retryService -> callRpcAsync(buildRequest(method, args), retryService));
+                return retryPolicy.retry(context).getResult();
+            }
+        }
 
-            // 4. 等待响应并返回结果
-            return waitResponse(future);
+        /**
+         * 异步执行RPC调用
+         */
+        private CompletableFuture<Response> callRpcAsync(Request request, ServiceMateData service) {
+            CompletableFuture<Response> future = new CompletableFuture<>();
+
+            // 获取连接通道
+            Channel channel = connectionManager.getChannel(service.getHost(), service.getPort());
+            if (channel == null) {
+                future.completeExceptionally(new RpcException("无法连接到服务端，host: " + service.getHost() + ", port: " + service.getPort()));
+                return future;
+            }
+
+            IN_FLIGHT_REQUEST_MAP.putIfAbsent(request.getRequestId(), future);
+
+            // 设置请求超时处理，如果在指定时间内没有收到响应，则从等待列表中移除并完成异常
+            Timeout timeout = hashedWheelTimer.newTimeout((e) -> {
+                if (IN_FLIGHT_REQUEST_MAP.remove(request.getRequestId()) != null) {
+                    future.completeExceptionally(new RpcException("RPC 调用超时，requestId: " + request.getRequestId()));
+                }
+            }, properties.getWaitResponseTimeoutMs(), TimeUnit.MILLISECONDS);
+
+            // 添加完成回调，记录调用结果并清理等待列表
+            future.whenComplete((r, t) -> {
+                if (t != null) {
+                    log.error("RPC 调用失败，requestId: {}, error: {}", request.getRequestId(), t.getMessage());
+                } else {
+                    log.info("RPC 调用成功，requestId: {}, response: {}", request.getRequestId(), r);
+                }
+                IN_FLIGHT_REQUEST_MAP.remove(request.getRequestId());
+                // 任务返回，需要取消时间轮的超时任务
+                timeout.cancel();
+            });
+
+            channel.writeAndFlush(request).addListener(f -> {
+                if (!f.isSuccess()) {
+                    future.completeExceptionally(f.cause());
+                }
+            });
+
+            return future;
         }
 
         /**
@@ -196,17 +274,6 @@ public class ConsumerProxyFactory {
         }
 
         /**
-         * 获取与服务端的通道连接
-         */
-        private Channel getChannel(ServiceMateData service) {
-            Channel channel = connectionManager.getChannel(service.getHost(), service.getPort());
-            if (channel == null) {
-                throw new RpcException("无法连接到服务端，host: " + service.getHost() + ", port: " + service.getPort());
-            }
-            return channel;
-        }
-
-        /**
          * 构建 RPC 请求
          */
         private Request buildRequest(Method method, Object[] args) {
@@ -216,31 +283,6 @@ public class ConsumerProxyFactory {
             request.setParamsClass(method.getParameterTypes());
             request.setParams(args);
             return request;
-        }
-
-        /**
-         * 发送 RPC 请求
-         */
-        private void sendRequest(Channel channel, Request request, CompletableFuture<Response> future) throws Exception {
-            IN_FLIGHT_REQUEST_MAP.putIfAbsent(request.getRequestId(), future);
-
-            channel.writeAndFlush(request).addListener(f -> {
-                if (!f.isSuccess()) {
-                    IN_FLIGHT_REQUEST_MAP.remove(request.getRequestId());
-                    future.completeExceptionally(f.cause());
-                }
-            });
-        }
-
-        /**
-         * 等待并处理响应
-         */
-        private Object waitResponse(CompletableFuture<Response> future) throws Exception {
-            Response resp = future.get(properties.getWaitResponseTimeoutMillis(), TimeUnit.MILLISECONDS);
-            if (Response.ResponseCode.SUCCESS.getCode() == resp.getCode()) {
-                return resp.getResult();
-            }
-            throw new RpcException("RPC 调用失败，错误信息: " + resp);
         }
     }
 }
