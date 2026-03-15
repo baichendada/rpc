@@ -25,9 +25,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 
 /**
  * ConsumerProxyFactory 负责创建 RPC 客户端的动态代理对象
@@ -50,63 +48,22 @@ public class ConsumerProxyFactory {
 
     public ConsumerProxyFactory(ConsumerProperties properties) throws Exception {
         this.properties = properties;
-        this.connectionManager = new ConnectionManager(createBootStrap());
         this.serviceRegistry = new DefaultServiceRegistry(properties.getServiceRegistryConfig());
         this.serviceRegistry.init(properties.getServiceRegistryConfig());
         this.balancer = createLoaderBalancer(properties.getLoadBalancePolicy());
         this.retryPolicy = createRetryPolicy(properties.getRetryPolicy());
         this.inFlightRequestManager = new InFlightRequestManager(properties);
+        this.connectionManager = new ConnectionManager(properties, inFlightRequestManager);
     }
 
-    private Bootstrap createBootStrap() {
-        Bootstrap bootstrap = new Bootstrap();
-        bootstrap.group(new NioEventLoopGroup(properties.getWorkerThreadNum()))
-                .channel(NioSocketChannel.class)
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, properties.getConnectTimeoutMs())
-                .handler(new ChannelInitializer<NioSocketChannel>() {
-                    @Override
-                    protected void initChannel(NioSocketChannel channel) throws Exception {
-                        channel.pipeline()
-                                // 1. 解码器：解码响应消息
-                                .addLast(new MessageDecoder())
-                                // 2. 编码器：编码请求消息
-                                .addLast(new RequestEncoder())
-                                // 3. 业务处理器：处理服务端响应
-                                .addLast(new ConsumerChannelHandler())
-                                // 4. 调试用：捕获未处理的消息
-                                .addLast(new ChannelInboundHandlerAdapter() {
-                                    @Override
-                                    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-                                        log.warn("未处理的消息: {}", msg.getClass().getName());
-                                        super.channelRead(ctx, msg);
-                                    }
-                                });
-                    }
-                });
-        return bootstrap;
-    }
-
-    private class ConsumerChannelHandler extends SimpleChannelInboundHandler<Response> {
-        @Override
-        protected void channelRead0(ChannelHandlerContext ctx, Response resp) throws Exception {
-            inFlightRequestManager.completeRequest(resp.getRequestId(), resp);
-        }
-
-        @Override
-        public void channelActive(ChannelHandlerContext ctx) throws Exception {
-            log.info("channel active: {}", ctx.channel().remoteAddress());
-        }
-
-        @Override
-        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-            log.info("channel inactive: {}", ctx.channel().remoteAddress());
-        }
-
-        @Override
-        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-            log.error("channel exception: {}", cause.getMessage());
-            ctx.close();
-        }
+    /**
+     * 关闭代理工厂，释放资源
+     */
+    public void shutdown() {
+        log.info("关闭 ConsumerProxyFactory，正在清理资源...");
+        connectionManager.shutdown();
+        inFlightRequestManager.shutdown();
+        log.info("ConsumerProxyFactory 已关闭");
     }
 
     @SuppressWarnings("unchecked")
@@ -193,20 +150,38 @@ public class ConsumerProxyFactory {
                 // 等待响应并返回结果
                 return future.get(properties.getWaitResponseTimeoutMs(), TimeUnit.MILLISECONDS).getResult();
             } catch (Exception e) {
-                if (System.currentTimeMillis() - startTime >= properties.getTotalTimeoutMs()) {
-                    throw e;
-                }
-                // 遇到异常情况重试
-                log.info("RPC 调用异常，进行重试，request: {}", request);
-                RetryContext context = new RetryContext();
-                context.setFailedService(service);
-                context.setRetryList(serviceRegistry.fetchSeviceList(interfaceClass.getName()));
-                context.setLoaderBalancer(balancer);
-                context.setWaitResponseTimeoutMillis(properties.getWaitResponseTimeoutMs());
-                context.setTotalTimeoutMs(properties.getTotalTimeoutMs() - (System.currentTimeMillis() - startTime));
-                context.setRetryFunction(retryService -> callRpcAsync(buildRequest(method, args), retryService));
-                return retryPolicy.retry(context).getResult();
+                return doRetry(method, args, e, startTime, request, service);
             }
+        }
+
+        private Object doRetry(Method method, Object[] args, Exception e, long startTime, Request request, ServiceMateData service) throws Exception {
+            // 检查是否应该重试
+            if (e instanceof ExecutionException ee) {
+                Throwable cause = ee.getCause();
+                if (cause instanceof RpcException rpcException && !rpcException.retry()) {
+                    // 不应该重试的异常（如 LimiterException），直接抛出底层异常
+                    throw rpcException;
+                }
+            }
+
+            // 检查总超时
+            if (System.currentTimeMillis() - startTime >= properties.getTotalTimeoutMs()) {
+                TimeoutException timeoutEx = new TimeoutException(
+                    "RPC 调用总超时 (" + properties.getTotalTimeoutMs() + "ms)，requestId: " + request.getRequestId()
+                );
+                timeoutEx.initCause(e);
+                throw timeoutEx;
+            }
+            // 遇到异常情况重试
+            log.info("RPC 调用异常，进行重试，request: {}", request);
+            RetryContext context = new RetryContext();
+            context.setFailedService(service);
+            context.setRetryList(serviceRegistry.fetchSeviceList(interfaceClass.getName()));
+            context.setLoaderBalancer(balancer);
+            context.setWaitResponseTimeoutMillis(properties.getWaitResponseTimeoutMs());
+            context.setTotalTimeoutMs(properties.getTotalTimeoutMs() - (System.currentTimeMillis() - startTime));
+            context.setRetryFunction(retryService -> callRpcAsync(buildRequest(method, args), retryService));
+            return retryPolicy.retry(context).getResult();
         }
 
         /**
@@ -218,7 +193,7 @@ public class ConsumerProxyFactory {
                     inFlightRequestManager.putRequest(request, service, properties.getWaitResponseTimeoutMs());
 
             // 获取连接通道
-            Channel channel = connectionManager.getChannel(service.getHost(), service.getPort());
+            Channel channel = connectionManager.getChannel(service);
             if (channel == null) {
                 future.completeExceptionally(new RpcException("无法连接到服务端，host: " + service.getHost() + ", port: " + service.getPort()));
                 return future;

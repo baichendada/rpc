@@ -1,5 +1,51 @@
 # 更新日志
 
+## [v0.11] - 2026-03-15
+
+### 关键修复（再次修复）
+- **修复 InFlightRequestManager 资源释放逻辑** ⚠️ **CRITICAL**
+  - 移除条件判断，改为无条件释放资源
+  - **问题**：超时回调只标记 future 为异常，不释放资源；whenComplete 通过条件判断跳过资源释放
+  - **修复**：whenComplete 无论何种完成方式都释放资源
+  - 感谢用户指出：超时场景下限流器、定时任务等资源未释放的问题
+
+### 代码改进
+- **为核心类添加详细注释**：
+  - `Limiter` 接口：说明不同实现的语义差异
+  - `RateLimiter`：详细说明令牌桶算法原理、CAS 操作流程、线程安全性
+  - `ConcurrencyLimiter`：说明使用场景和 acquire/release 成对调用的重要性
+  - `InFlightRequestManager.putRequest()`：逐步注释两级限流、超时处理、资源释放机制
+  - `ProviderServer.LimiterServerHandler`：详细注释请求 ID 跟踪机制和许可释放时机
+
+### 代码改进
+- **RpcException 重构**：
+  - 将 retry 字段改为 final，通过构造函数传递
+  - 遵循 Java 不可变对象最佳实践，线程安全
+  - LimiterException 通过 super(message, false) 传递 retry 标志
+
+- **异常处理改进**：
+  - doRetry() 方法直接抛出底层 RpcException 而非 ExecutionException
+  - TimeoutException 包装原始异常，保留异常链
+  - 更清晰的异常传播路径
+
+- **Provider 限流器文档**：
+  - 为 LimiterServerHandler 添加详细 JavaDoc
+  - 说明两级限流策略和请求 ID 跟踪机制
+  - 添加空指针检查和错误日志
+
+### 架构改进
+- **Consumer 端**：
+  - Bootstrap 创建逻辑移至 ConnectionManager（职责更清晰）
+  - EventLoopGroup 生命周期由 ConnectionManager 管理
+  - 支持优雅关闭（shutdown 方法）
+
+- **Provider 端**：
+  - 全局 serviceLimiter 替代 per-connection limiter
+  - 使用 Set 跟踪请求 ID 而非计数器（更可靠）
+  - channelInactive 时释放所有未完成请求的许可
+
+---
+
 ## [v0.10] - 2026-03-15
 
 ### 新增功能
@@ -12,15 +58,6 @@
   - 封装限流逻辑
   - 提供 `shutdown()` 方法释放资源
 - **LimiterException**：新增限流异常类，区分全局限流和单服务限流
-
-### 代码修复
-- **关键修复：ConcurrencyLimiter 资源泄漏**
-  - **原 bug**: 全局并发限制器获取许可后从未释放，导致 100 个请求后系统永久拒绝所有请求
-  - **修复**: 在请求完成回调中调用 `globalLimiter.release()` 释放许可
-  - **修复**: 在速率限流失败时也释放已获取的全局许可，避免部分泄漏
-- **竞态条件修复**：`whenComplete` 回调中检查请求是否存在于 map 再释放资源，避免重复释放
-- **日志优化**：将 "空闲请求" 改为 "未找到正在等待的请求 (可能已超时或重复响应)"，更准确
-- **HashedWheelTimer 生命周期管理**：新增 `shutdown()` 方法停止时间轮定时器，避免 JVM 无法正常退出
 
 ### 代码重构
 - **ConsumerProxyFactory 重构**：将请求管理逻辑从 `ConsumerProxyFactory` 抽离到 `InFlightRequestManager`

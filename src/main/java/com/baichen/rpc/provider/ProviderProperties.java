@@ -8,5 +8,7 @@ public class ProviderProperties {
     private String host;
     private Integer port;
     private Integer workerThreadNum = 4;
+    private Integer globalLimit = 100;
+    private Integer serviceLimit = 3;
     private ServiceRegistryConfig serviceRegistryConfig;
 }

@@ -4,6 +4,7 @@ package com.baichen.rpc.exception;
  * 限流异常
  * <p>
  * 当 RPC 请求因触发限流策略而被拒绝时抛出此异常。
+ * 此异常不应该触发重试（retry = false），因为重试同样会被限流拒绝。
  * </p>
  *
  * <h3>限流类型</h3>
@@ -17,6 +18,6 @@ package com.baichen.rpc.exception;
  */
 public class LimiterException extends RpcException {
     public LimiterException(String message) {
-        super(message);
+        super(message, false);  // 限流异常不应该重试
     }
 }
