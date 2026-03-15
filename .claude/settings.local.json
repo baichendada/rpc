@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git restore:*)",
+      "Bash(cd:*)",
+      "Bash(chmod +x:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(cd C:\\\\Users\\\\Administrator\\\\Desktop\\\\project\\\\rpc\\\\rpc\\\\src\\\\main\\\\java\\\\com\\\\baichen\\\\rpc:*)",
+      "Bash(cd C:\\\\Users\\\\Administrator\\\\Desktop\\\\project\\\\rpc\\\\rpc\\\\src\\\\main\\\\java\\\\com\\\\baichen\\\\rpc\\\\registry:*)",
+      "Bash(cd C:\\\\Users\\\\Administrator\\\\Desktop\\\\project\\\\rpc\\\\rpc:*)",
+      "mcp__ide__getDiagnostics"
+    ]
+  },
+  "disableAllHooks": false
+}

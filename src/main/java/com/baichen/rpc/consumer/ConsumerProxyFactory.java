@@ -1,7 +1,8 @@
 package com.baichen.rpc.consumer;
 
-import com.baichen.rpc.codec.MessageDecoder;
-import com.baichen.rpc.codec.RequestEncoder;
+import com.baichen.metrics.MetricsData;
+import com.baichen.rpc.breaker.CircuitBreaker;
+import com.baichen.rpc.breaker.CircuitBreakerManager;
 import com.baichen.rpc.exception.RpcException;
 import com.baichen.rpc.loaderbalance.LoaderBalancer;
 import com.baichen.rpc.loaderbalance.RandomLoaderBalancer;
@@ -12,19 +13,14 @@ import com.baichen.rpc.registry.DefaultServiceRegistry;
 import com.baichen.rpc.registry.ServiceMateData;
 import com.baichen.rpc.registry.ServiceRegistry;
 import com.baichen.rpc.retry.*;
-import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
-import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.nio.NioSocketChannel;
-import io.netty.util.HashedWheelTimer;
-import io.netty.util.Timeout;
 import lombok.extern.slf4j.Slf4j;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.*;
 
 /**
@@ -46,6 +42,8 @@ public class ConsumerProxyFactory {
 
     private final InFlightRequestManager inFlightRequestManager;
 
+    private final CircuitBreakerManager breakerManager;
+
     public ConsumerProxyFactory(ConsumerProperties properties) throws Exception {
         this.properties = properties;
         this.serviceRegistry = new DefaultServiceRegistry(properties.getServiceRegistryConfig());
@@ -54,6 +52,7 @@ public class ConsumerProxyFactory {
         this.retryPolicy = createRetryPolicy(properties.getRetryPolicy());
         this.inFlightRequestManager = new InFlightRequestManager(properties);
         this.connectionManager = new ConnectionManager(properties, inFlightRequestManager);
+        this.breakerManager = new CircuitBreakerManager(properties);
     }
 
     /**
@@ -140,21 +139,54 @@ public class ConsumerProxyFactory {
         private Object invokeRemote(Method method, Object[] args) throws Exception {
 
             long startTime = System.currentTimeMillis();
+
             // 从注册中心获取服务地址
-            ServiceMateData service = getServiceFromRegistry();
+            List<ServiceMateData> serviceMateDataList = new ArrayList<>(serviceRegistry.fetchSeviceList(interfaceClass.getName()));
+            log.info("从注册中心获取到服务列表: {}", serviceMateDataList);
+            if (serviceMateDataList.isEmpty()) {
+                throw new RpcException("未找到服务 " + interfaceClass.getName() + " 的注册信息");
+            }
+            ServiceMateData service = decideService(serviceMateDataList);
 
             // 构建并发送请求
             Request request = buildRequest(method, args);
+            MetricsData metricsData = MetricsData.create(method, args, service);
+            CircuitBreaker circuitBreaker = breakerManager.getOrCreateBreaker(service);
+            Response resp = null;
             try {
                 CompletableFuture<Response> future = callRpcAsync(request, service);
                 // 等待响应并返回结果
-                return future.get(properties.getWaitResponseTimeoutMs(), TimeUnit.MILLISECONDS).getResult();
+                resp =  future.get(properties.getWaitResponseTimeoutMs(), TimeUnit.MILLISECONDS);
+                metricsData.complete();
+                circuitBreaker.recordRpc(metricsData);
             } catch (Exception e) {
-                return doRetry(method, args, e, startTime, request, service);
+                metricsData.completeWithException(e);
+                circuitBreaker.recordRpc(metricsData);
+                return doRetry(metricsData, service);
             }
+
+            return postProcessResponse(resp, metricsData);
         }
 
-        private Object doRetry(Method method, Object[] args, Exception e, long startTime, Request request, ServiceMateData service) throws Exception {
+        private ServiceMateData decideService(List<ServiceMateData> serviceMateDataList) {
+            while (!serviceMateDataList.isEmpty()) {
+                ServiceMateData select = balancer.select(serviceMateDataList);
+                CircuitBreaker circuitBreaker = breakerManager.getOrCreateBreaker(select);
+                if (circuitBreaker.allowRequest()) {
+                    return select;
+                }
+                log.warn("服务 {}:{} 处于熔断状态，跳过该服务", select.getHost(), select.getPort());
+                serviceMateDataList.remove(select);
+            }
+            throw new RpcException("No more service to call");
+        }
+
+        private Object postProcessResponse(Response resp, MetricsData metricsData) {
+            return resp.getResult();
+        }
+
+        private Object doRetry(MetricsData metricsData, ServiceMateData service) throws Exception {
+            Throwable e = metricsData.getT();
             // 检查是否应该重试
             if (e instanceof ExecutionException ee) {
                 Throwable cause = ee.getCause();
@@ -165,22 +197,40 @@ public class ConsumerProxyFactory {
             }
 
             // 检查总超时
-            if (System.currentTimeMillis() - startTime >= properties.getTotalTimeoutMs()) {
-                TimeoutException timeoutEx = new TimeoutException(
-                    "RPC 调用总超时 (" + properties.getTotalTimeoutMs() + "ms)，requestId: " + request.getRequestId()
-                );
+            if (metricsData.getDuration() >= properties.getTotalTimeoutMs()) {
+                TimeoutException timeoutEx = new TimeoutException("RPC 调用总超时 (" + properties.getTotalTimeoutMs() + "ms) ");
                 timeoutEx.initCause(e);
                 throw timeoutEx;
             }
             // 遇到异常情况重试
-            log.info("RPC 调用异常，进行重试，request: {}", request);
+            log.info("RPC 调用异常，进行重试");
             RetryContext context = new RetryContext();
             context.setFailedService(service);
             context.setRetryList(serviceRegistry.fetchSeviceList(interfaceClass.getName()));
             context.setLoaderBalancer(balancer);
             context.setWaitResponseTimeoutMillis(properties.getWaitResponseTimeoutMs());
-            context.setTotalTimeoutMs(properties.getTotalTimeoutMs() - (System.currentTimeMillis() - startTime));
-            context.setRetryFunction(retryService -> callRpcAsync(buildRequest(method, args), retryService));
+            context.setTotalTimeoutMs(properties.getTotalTimeoutMs() - metricsData.getDuration());
+            context.setRetryFunction(retryService -> {
+                CompletableFuture<Response> future;
+                CircuitBreaker circuitBreaker = breakerManager.getOrCreateBreaker(service);
+                if (!circuitBreaker.allowRequest()) {
+                    future = new CompletableFuture<>();
+                    future.completeExceptionally(new RpcException("短路器已打开，无法调用服务 " + retryService.getHost() + ":" + retryService.getPort()));
+                    return future;
+                }
+
+                MetricsData metricsData1 = MetricsData.create(metricsData.getMethod(), metricsData.getArgs(), retryService);
+                future = callRpcAsync(buildRequest(metricsData.getMethod(), metricsData.getArgs()), retryService);
+                future.whenComplete((r, t) -> {
+                    if (t != null) {
+                        metricsData1.completeWithException(t);
+                    } else {
+                        metricsData1.complete();
+                    }
+                    circuitBreaker.recordRpc(metricsData1);
+                });
+                return future;
+            });
             return retryPolicy.retry(context).getResult();
         }
 
@@ -207,18 +257,6 @@ public class ConsumerProxyFactory {
             });
 
             return future;
-        }
-
-        /**
-         * 从注册中心获取服务信息
-         */
-        private ServiceMateData getServiceFromRegistry() throws Exception {
-            List<ServiceMateData> serviceMateDataList = serviceRegistry.fetchSeviceList(interfaceClass.getName());
-            log.info("从注册中心获取到服务列表: {}", serviceMateDataList);
-            if (serviceMateDataList == null || serviceMateDataList.isEmpty()) {
-                throw new RpcException("未找到服务 " + interfaceClass.getName() + " 的注册信息");
-            }
-            return balancer.select(serviceMateDataList);
         }
 
         /**

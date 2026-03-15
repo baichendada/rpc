@@ -45,19 +45,20 @@ public class RateLimiter implements Limiter {
     /**
      * CAS 操作最大重试次数
      * <p>
-     * 在高并发场景下，如果 CAS 连续失败 32 次，说明竞争非常激烈，直接拒绝请求。
+     * 在高并发场景下，如果 CAS 连续失败 512 次，说明竞争非常激烈，直接拒绝请求。
      * </p>
      */
-    private final int MAX_ATTEMPTS = 32;
+    private final int MAX_ATTEMPTS = 512;
 
     /**
      * 最大等待时间（纳秒）
      * <p>
-     * 如果下一个可用时间点距离现在超过 500ms，则拒绝请求。
+     * 如果下一个可用时间点距离现在超过 1 秒，则拒绝请求。
      * 这避免了请求在队列中等待过久。
+     * 对于低速率限流（如 3 req/s），需要较大的等待时间以支持适度的并发。
      * </p>
      */
-    private final long MAX_WAIT_DURATION = TimeUnit.MILLISECONDS.toNanos(500);
+    private final long MAX_WAIT_DURATION = TimeUnit.SECONDS.toNanos(1);
 
     /**
      * 每个许可需要的时间间隔（纳秒）

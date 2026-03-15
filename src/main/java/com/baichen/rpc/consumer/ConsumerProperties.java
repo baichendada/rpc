@@ -31,6 +31,10 @@ public class ConsumerProperties {
      */
     private Integer serviceLimit = 3;
 
+    private Long slowRequestThresholdMs = 2000L;
+
+    private Double slowRequestRate = 0.5;
+
     /** 负载均衡策略：roundRobin（轮询）、random（随机） */
     private String loadBalancePolicy = "roundRobin";
 

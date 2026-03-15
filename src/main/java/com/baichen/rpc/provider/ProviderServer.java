@@ -53,11 +53,6 @@ public class ProviderServer {
     private final Limiter globalLimiter;
 
     /**
-     * 全局服务速率限流器（所有连接共享）
-     */
-    private final Limiter serviceLimiter;
-
-    /**
      * Boss 事件循环组，负责处理 Accept 事件
      */
     private EventLoopGroup bossEventGroup;
@@ -75,7 +70,6 @@ public class ProviderServer {
         this.serviceRegistry.init(properties.getServiceRegistryConfig());
         this.properties = properties;
         this.globalLimiter = new ConcurrencyLimiter(properties.getGlobalLimit());
-        this.serviceLimiter = new RateLimiter(properties.getServiceLimit());
     }
 
     /**
@@ -162,11 +156,9 @@ public class ProviderServer {
      */
     private class LimiterServerHandler extends ChannelDuplexHandler {
 
-        /**
-         * 跟踪当前 Channel 上已获取全局许可的请求 ID
-         */
-        AttributeKey<java.util.Set<Integer>> ATTR_KEY_REQUEST_IDS =
-            AttributeKey.valueOf("attr_key_request_ids");
+        AttributeKey<Limiter> ATTR_KEY_LIMITER = AttributeKey.valueOf("limiter");
+
+        AttributeKey<AtomicInteger> ATTR_KEY_GLOBAL_COUNTER = AttributeKey.valueOf("global_counter");
 
         /**
          * 处理入站请求，进行两级限流检查
@@ -194,9 +186,9 @@ public class ProviderServer {
                 return;
             }
 
-            // ========== 第二级：全局速率限流 ==========
-            // 所有连接共享同一个 RateLimiter，限制服务端的总体 QPS
-            if (!serviceLimiter.tryAcquire()) {
+            // ========== 第二级：channel速率限流 ==========
+            Limiter limiter = ctx.channel().attr(ATTR_KEY_LIMITER).get();
+            if (!limiter.tryAcquire()) {
                 log.warn("全局速率限流触发，拒绝请求: {}", request.getRequestId());
                 globalLimiter.release();  // 释放已获取的全局并发许可（避免资源泄漏）
                 Response response = Response.fail("服务繁忙，请稍后重试（速率限制）", request.getRequestId());
@@ -204,16 +196,7 @@ public class ProviderServer {
                 return;
             }
 
-            // ========== 跟踪请求 ID ==========
-            // 将请求 ID 添加到 Channel 的跟踪集合中
-            // 在 write 完成后，通过此集合判断是否需要释放许可
-            java.util.Set<Integer> requestIds = ctx.channel().attr(ATTR_KEY_REQUEST_IDS).get();
-            if (requestIds != null) {
-                requestIds.add(request.getRequestId());
-            } else {
-                log.error("REQUEST_IDS 集合未初始化，channel: {}", ctx.channel());
-            }
-
+            ctx.channel().attr(ATTR_KEY_GLOBAL_COUNTER).get().incrementAndGet();
             // 传递给下一个 Handler 处理
             ctx.fireChannelRead(msg);
         }
@@ -238,17 +221,13 @@ public class ProviderServer {
          */
         @Override
         public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
-            if (msg instanceof Response response) {
-                promise.addListener(future -> {
-                    java.util.Set<Integer> requestIds = ctx.channel().attr(ATTR_KEY_REQUEST_IDS).get();
-                    if (requestIds != null && requestIds.remove(response.getRequestId())) {
-                        // 只有当此请求 ID 被成功移除时才释放许可
-                        // remove() 返回 true 说明此 ID 确实在集合中，即获取了许可
-                        globalLimiter.release();
-                        serviceLimiter.release();  // RateLimiter.release() 是 no-op，但为了对称性仍然调用
-                    }
-                });
-            }
+            promise.addListener((ChannelFutureListener) future -> {
+                int count = ctx.channel().attr(ATTR_KEY_GLOBAL_COUNTER).get().getAndDecrement();
+                if (count > 0) {
+                    ctx.channel().attr(ATTR_KEY_LIMITER).get().release();
+                    globalLimiter.release();
+                }
+            });
             ctx.write(msg, promise);
         }
 
@@ -261,8 +240,8 @@ public class ProviderServer {
          */
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
-            // 初始化请求 ID 跟踪集合（使用线程安全的 Set）
-            ctx.channel().attr(ATTR_KEY_REQUEST_IDS).set(java.util.concurrent.ConcurrentHashMap.newKeySet());
+            ctx.channel().attr(ATTR_KEY_LIMITER).set(new RateLimiter(properties.getServiceLimit()));
+            ctx.channel().attr(ATTR_KEY_GLOBAL_COUNTER).set(new AtomicInteger(0));
             ctx.fireChannelActive();
         }
 
@@ -279,14 +258,9 @@ public class ProviderServer {
          */
         @Override
         public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-            // 连接关闭时，释放所有未完成请求的许可
-            java.util.Set<Integer> requestIds = ctx.channel().attr(ATTR_KEY_REQUEST_IDS).get();
-            if (requestIds != null && !requestIds.isEmpty()) {
-                int count = requestIds.size();
-                log.warn("连接关闭时仍有 {} 个请求未完成，释放对应的全局并发许可", count);
+            int count = ctx.channel().attr(ATTR_KEY_GLOBAL_COUNTER).get().getAndSet(0);
+            if (count > 0) {
                 globalLimiter.release(count);
-                // serviceLimiter 不需要释放（RateLimiter 是时间窗口限流，不需要 release）
-                requestIds.clear();
             }
             ctx.fireChannelInactive();
         }

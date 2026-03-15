@@ -1,5 +1,45 @@
 # 更新日志
 
+## [v0.12] - 2026-03-16
+
+### 新增功能
+- **熔断器 (Circuit Breaker)**：新增基于响应时间的熔断器实现
+  - **滑动窗口统计**：使用 10 秒滑动窗口，1 秒为一个槽位，统计请求成功/失败比例
+  - **三种状态**：CLOSED（正常）、OPEN（熔断）、HALF_OPEN（半开）
+  - **可配置参数**：
+    - `slowRequestThresholdMs`: 慢请求阈值（默认 1000ms）
+    - `slowRequestRatioThreshold`: 慢请求比例阈值（默认 50%）
+    - `minRequestCountThreshold`: 最小请求数阈值（默认 5）
+    - `breakMs`: 熔断持续时间（默认 5000ms）
+  - **熔断触发条件**：滑动窗口内慢请求比例超过阈值且请求数达到最小阈值
+  - **半开探测**：熔断 5 秒后进入半开状态，允许少量请求探测服务是否恢复
+- **MetricsData**：新增指标数据类，用于记录 RPC 调用的成功/失败/耗时信息
+
+### 代码修复
+- **RateLimiter 限流阈值修复** ⚠️ **CRITICAL**
+  - **问题**：MAX_WAIT_DURATION 为 500ms，对于 3 req/s 的低速率限流，只能容纳约 1-2 个并发请求
+  - **修复**：将 MAX_WAIT_DURATION 从 500ms 调整为 1s，支持适度并发
+  - **问题**：MAX_ATTEMPTS 为 32，高并发下 CAS 竞争激烈时重试次数不足
+  - **修复**：将 MAX_ATTEMPTS 从 32 调整为 512
+
+- **ResponseTimeCircuitBreaker 统计逻辑修复** ⚠️ **CRITICAL**
+  - **问题**：`processClosedState` 中慢请求会 `decrementAndGet` requestCount，导致 totalRequestCount 可能为负数
+  - **修复**：无论成功还是失败请求，都先 `incrementAndGet` requestCount，再对失败请求增加 failedCount
+
+### 集成变更
+- **ConsumerProxyFactory 集成熔断器**：
+  - 服务选择前通过 `circuitBreaker.allowRequest()` 检查服务是否可用
+  - 熔断时跳过不可用服务，继续尝试其他服务
+  - RPC 调用完成后通过 `circuitBreaker.recordRpc()` 记录指标
+
+### 架构改进
+- **CircuitBreaker 接口重构**：
+  - `allowRequest()` 方法参数从 `ServiceMateData service` 改为无参数
+  - `recordRpc()` 方法参数从 `ServiceMateData service, MetricsData metricsData` 改为只接收 `MetricsData`
+  - 熔断器状态管理内部化，不再依赖外部传入 service 参数
+
+---
+
 ## [v0.11] - 2026-03-15
 
 ### 关键修复（再次修复）
