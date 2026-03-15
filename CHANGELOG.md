@@ -1,5 +1,40 @@
 # 更新日志
 
+## [v0.9] - 2026-03-15
+
+### 新增功能
+- **限流器抽象**：新增 `Limiter` 接口，定义统一的限流 API
+- **速率限流器 (RateLimiter)**：基于令牌桶算法的速率限流器
+  - 使用 CAS 无锁并发控制，纳秒级精度
+  - 支持最大等待时间配置（默认 500ms）
+  - 最大重试次数限制（32 次）
+- **并发限流器 (ConcurrencyLimiter)**：基于 Semaphore 的并发限流器
+  - 限制同时处理的最大请求数
+  - 支持 acquire/release 语义
+- **时间窗口限流器 (timeAreaLimiter)**：基于时间窗口的令牌桶限流器（已标记 @Deprecated）
+
+### 代码修复
+- **RateLimiter CAS 逻辑修复**：修复严重的并发 bug
+  - **原实现**: `Math.max(now + nsPerPermit, pre)` 在 `pre > now` 时会导致时间窗口无法推进
+  - **修复后**: `Math.max(now, pre) + nsPerPermit` 确保每次都正确推进时间窗口
+- **RateLimiter 参数校验**：新增构造函数参数验证
+  - 拒绝 null、零或负数的 `permitsPerSecond`
+  - 限制最大值为 10 亿（防止整数溢出）
+- **timeAreaLimiter 资源泄漏修复**：
+  - 使用 `GlobalEventExecutor.INSTANCE` 替代自定义 `DefaultEventLoop`，避免线程池泄漏
+  - 使用 `getAndSet` 替代 `set`，修复令牌填充的竞态条件
+
+### 代码优化
+- **并发安全性增强**：所有限流器实现均通过原子操作保证线程安全
+- **性能优化**：RateLimiter 最大重试次数从 512 降低到 32，减少 CPU 空转
+
+### 技术细节
+- **算法**: 令牌桶算法（Token Bucket）
+- **并发控制**: CAS (Compare-And-Swap) 无锁编程
+- **时间精度**: 纳秒级 (System.nanoTime())
+
+---
+
 ## [v0.8] - 2026-03-15
 
 ### 新增功能

@@ -54,6 +54,11 @@ src/main/java/com/baichen/rpc/
     ├── RetrySamePolicy.java      # 同一服务重试（指数退避）
     ├── FailOverPolicy.java       # 故障转移重试
     └── ForkAllPolicy.java        # 并行重试所有服务
+└── limiter/         # 限流器
+    ├── Limiter.java              # 限流器接口
+    ├── RateLimiter.java          # 速率限流器（令牌桶算法）
+    ├── ConcurrencyLimiter.java   # 并发限流器
+    └── timeAreaLimiter.java      # 时间窗口限流器（已废弃）
 ```
 
 ## 通信协议
@@ -169,12 +174,14 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] 服务注册中心（支持 Zookeeper/Redis）
 - [x] 负载均衡（随机、轮询）
 - [x] 重试机制（FailOver、RetrySame、ForkAll）
+- [x] 限流器（速率限流、并发限流）
 
 ## 待完善功能
 
 - [ ] 多种序列化方式（Hessian、Protobuf）
-- [ ] 服务治理（熔断、限流）
+- [ ] 服务治理（熔断）
 - [ ] Redis 注册中心实现
+- [ ] 限流器与 RPC 框架集成
 
 ---
 
