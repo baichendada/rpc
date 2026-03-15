@@ -1,5 +1,45 @@
 # 更新日志
 
+## [v0.10] - 2026-03-15
+
+### 新增功能
+- **限流器集成到 RPC 框架**：将限流功能正式集成到消费者端
+  - 全局并发限流：使用 `ConcurrencyLimiter` 限制客户端同时处理的最大请求数（默认 100）
+  - 单服务速率限流：使用 `RateLimiter` 限制每个服务的每秒请求数（默认 3 req/s）
+  - 触发限流时抛出 `LimiterException` 异常，调用方可捕获并处理
+- **InFlightRequestManager**：新增请求管理器类，统一管理请求生命周期
+  - 封装请求超时管理（HashedWheelTimer）
+  - 封装限流逻辑
+  - 提供 `shutdown()` 方法释放资源
+- **LimiterException**：新增限流异常类，区分全局限流和单服务限流
+
+### 代码修复
+- **关键修复：ConcurrencyLimiter 资源泄漏**
+  - **原 bug**: 全局并发限制器获取许可后从未释放，导致 100 个请求后系统永久拒绝所有请求
+  - **修复**: 在请求完成回调中调用 `globalLimiter.release()` 释放许可
+  - **修复**: 在速率限流失败时也释放已获取的全局许可，避免部分泄漏
+- **竞态条件修复**：`whenComplete` 回调中检查请求是否存在于 map 再释放资源，避免重复释放
+- **日志优化**：将 "空闲请求" 改为 "未找到正在等待的请求 (可能已超时或重复响应)"，更准确
+- **HashedWheelTimer 生命周期管理**：新增 `shutdown()` 方法停止时间轮定时器，避免 JVM 无法正常退出
+
+### 代码重构
+- **ConsumerProxyFactory 重构**：将请求管理逻辑从 `ConsumerProxyFactory` 抽离到 `InFlightRequestManager`
+  - 移除静态的 `IN_FLIGHT_REQUEST_MAP`
+  - 将 `ConsumerChannelHandler` 从 static 改为 inner class，可访问 `InFlightRequestManager`
+  - 简化 `callRpcAsync` 方法，超时和限流逻辑统一由 `InFlightRequestManager` 处理
+
+### 文档更新
+- **JavaDoc 完善**：为 `InFlightRequestManager` 和 `LimiterException` 添加详细文档
+- **配置注释**：为 `ConsumerProperties` 添加字段注释，说明默认值和推荐配置
+- **限流策略说明**：在 JavaDoc 中详细说明两级限流策略和线程安全性
+
+### 配置变更
+- **ConsumerProperties 新增字段**：
+  - `globalLimit`: 全局并发限制（默认 100）
+  - `serviceLimit`: 单服务速率限制（默认 3 req/s，生产环境建议调整为 100-1000）
+
+---
+
 ## [v0.9] - 2026-03-15
 
 ### 新增功能

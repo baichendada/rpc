@@ -36,9 +36,6 @@ import java.util.concurrent.TimeUnit;
 @Slf4j
 public class ConsumerProxyFactory {
 
-    // 用于维护正在等待响应的请求，key为请求ID，value为对应的 CompletableFuture
-    private static final Map<Integer, CompletableFuture<Response>> IN_FLIGHT_REQUEST_MAP = new ConcurrentHashMap<>();
-
     private ConnectionManager connectionManager;
 
     private final ServiceRegistry serviceRegistry;
@@ -49,7 +46,7 @@ public class ConsumerProxyFactory {
 
     private final RetryPolicy retryPolicy;
 
-    private final HashedWheelTimer hashedWheelTimer;
+    private final InFlightRequestManager inFlightRequestManager;
 
     public ConsumerProxyFactory(ConsumerProperties properties) throws Exception {
         this.properties = properties;
@@ -58,7 +55,7 @@ public class ConsumerProxyFactory {
         this.serviceRegistry.init(properties.getServiceRegistryConfig());
         this.balancer = createLoaderBalancer(properties.getLoadBalancePolicy());
         this.retryPolicy = createRetryPolicy(properties.getRetryPolicy());
-        this.hashedWheelTimer = new HashedWheelTimer(1, TimeUnit.SECONDS, 64);
+        this.inFlightRequestManager = new InFlightRequestManager(properties);
     }
 
     private Bootstrap createBootStrap() {
@@ -89,17 +86,10 @@ public class ConsumerProxyFactory {
         return bootstrap;
     }
 
-    private static class ConsumerChannelHandler extends SimpleChannelInboundHandler<Response> {
+    private class ConsumerChannelHandler extends SimpleChannelInboundHandler<Response> {
         @Override
         protected void channelRead0(ChannelHandlerContext ctx, Response resp) throws Exception {
-            CompletableFuture<Response> resultFuture = IN_FLIGHT_REQUEST_MAP.remove(resp.getRequestId());
-            if (resultFuture == null) {
-                log.warn("未找到对应的请求，requestId: {}", resp.getRequestId());
-                return;
-            }
-            // 打印收到的响应
-            log.info("收到响应: {}", resp);
-            resultFuture.complete(resp);
+            inFlightRequestManager.completeRequest(resp.getRequestId(), resp);
         }
 
         @Override
@@ -207,6 +197,7 @@ public class ConsumerProxyFactory {
                     throw e;
                 }
                 // 遇到异常情况重试
+                log.info("RPC 调用异常，进行重试，request: {}", request);
                 RetryContext context = new RetryContext();
                 context.setFailedService(service);
                 context.setRetryList(serviceRegistry.fetchSeviceList(interfaceClass.getName()));
@@ -222,7 +213,9 @@ public class ConsumerProxyFactory {
          * 异步执行RPC调用
          */
         private CompletableFuture<Response> callRpcAsync(Request request, ServiceMateData service) {
-            CompletableFuture<Response> future = new CompletableFuture<>();
+            // 添加请求到等待列表
+            CompletableFuture<Response> future =
+                    inFlightRequestManager.putRequest(request, service, properties.getWaitResponseTimeoutMs());
 
             // 获取连接通道
             Channel channel = connectionManager.getChannel(service.getHost(), service.getPort());
@@ -231,27 +224,7 @@ public class ConsumerProxyFactory {
                 return future;
             }
 
-            IN_FLIGHT_REQUEST_MAP.putIfAbsent(request.getRequestId(), future);
-
-            // 设置请求超时处理，如果在指定时间内没有收到响应，则从等待列表中移除并完成异常
-            Timeout timeout = hashedWheelTimer.newTimeout((e) -> {
-                if (IN_FLIGHT_REQUEST_MAP.remove(request.getRequestId()) != null) {
-                    future.completeExceptionally(new RpcException("RPC 调用超时，requestId: " + request.getRequestId()));
-                }
-            }, properties.getWaitResponseTimeoutMs(), TimeUnit.MILLISECONDS);
-
-            // 添加完成回调，记录调用结果并清理等待列表
-            future.whenComplete((r, t) -> {
-                if (t != null) {
-                    log.error("RPC 调用失败，requestId: {}, error: {}", request.getRequestId(), t.getMessage());
-                } else {
-                    log.info("RPC 调用成功，requestId: {}, response: {}", request.getRequestId(), r);
-                }
-                IN_FLIGHT_REQUEST_MAP.remove(request.getRequestId());
-                // 任务返回，需要取消时间轮的超时任务
-                timeout.cancel();
-            });
-
+            // 发送请求
             channel.writeAndFlush(request).addListener(f -> {
                 if (!f.isSuccess()) {
                     future.completeExceptionally(f.cause());
