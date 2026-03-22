@@ -5,6 +5,7 @@ import com.baichen.rpc.codec.MessageDecoder;
 import com.baichen.rpc.codec.MessageEncoder;
 import com.baichen.rpc.compressor.Compressor;
 import com.baichen.rpc.compressor.CompressorManager;
+import com.baichen.rpc.handler.HeartbeatHandler;
 import com.baichen.rpc.message.Response;
 import com.baichen.rpc.registry.ServiceMateData;
 import com.baichen.rpc.serializer.Serializer;
@@ -65,6 +66,7 @@ public class ConnectionManager {
                                 .addLast(new MessageDecoder())
                                 // 2. 编码器：编码请求消息
                                 .addLast(new MessageEncoder())
+                                .addLast(new HeartbeatHandler())
                                 // 3. 业务处理器：处理服务端响应
                                 .addLast(new ConsumerChannelHandler())
                                 // 4. 调试用：捕获未处理的消息

@@ -93,7 +93,7 @@ src/main/java/com/baichen/rpc/
 
 - Length:  整个消息的长度（不包括 Length 字段本身）
 - Magic:   魔数 "baichen"，用于协议校验
-- Type:    消息类型 (1=Request, 2=Response)
+- Type:    消息类型 (1=Request, 2=Response, 3=HeartbeatRequest, 4=HeartbeatResponse)
 - Version: 协议版本 (1=V1)
 - SACType: 上四位=序列化类型，下四位=压缩类型
 - Body:    消息体，按序列化类型编码
@@ -202,6 +202,7 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] 可插拔序列化（JSON / Hessian）
 - [x] 可插拔压缩（None / GZIP），消息体 ≤ 256 字节自动跳过压缩
 - [x] 统一编解码器（MessageEncoder/MessageDecoder），协议头新增版本号和序列化/压缩类型
+- [x] 心跳机制（HeartbeatHandler + IdleStateHandler），支持双向心跳检测和空闲连接关闭
 
 ## 限流策略
 

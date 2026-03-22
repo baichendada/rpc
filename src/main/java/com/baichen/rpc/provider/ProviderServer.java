@@ -5,6 +5,7 @@ import com.baichen.rpc.codec.MessageDecoder;
 import com.baichen.rpc.codec.MessageEncoder;
 import com.baichen.rpc.compressor.Compressor;
 import com.baichen.rpc.compressor.CompressorManager;
+import com.baichen.rpc.handler.HeartbeatHandler;
 import com.baichen.rpc.limiter.ConcurrencyLimiter;
 import com.baichen.rpc.limiter.Limiter;
 import com.baichen.rpc.limiter.RateLimiter;
@@ -13,7 +14,6 @@ import com.baichen.rpc.message.Response;
 import com.baichen.rpc.registry.DefaultServiceRegistry;
 import com.baichen.rpc.registry.ServiceMateData;
 import com.baichen.rpc.registry.ServiceRegistry;
-import com.baichen.rpc.registry.ServiceRegistryConfig;
 import com.baichen.rpc.serializer.Serializer;
 import com.baichen.rpc.serializer.SerializerManager;
 import io.netty.bootstrap.ServerBootstrap;
@@ -21,10 +21,12 @@ import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.AttributeKey;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Locale;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -107,6 +109,10 @@ public class ProviderServer {
                                     .addLast(new MessageDecoder())
                                     // 2. 编码器：编码响应消息
                                     .addLast(new MessageEncoder())
+                                    // 3. 空闲连接检测：30秒读空闲，5秒写空闲，0秒全空闲
+                                    .addLast(new IdleStateHandler(30, 5, 0, TimeUnit.SECONDS))
+                                    // 4. 心跳处理器：处理心跳请求，保持连接活跃
+                                    .addLast(new HeartbeatHandler())
                                     // 3. 限流器：全局和接口限流
                                     .addLast(new LimiterServerHandler())
                                     // 4. 业务处理器：处理请求并返回响应

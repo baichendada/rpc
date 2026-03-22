@@ -43,6 +43,10 @@ public class Message {
          * 响应消息
          */
         RESPONSE(2, Response.class),
+
+        HEARTBEAT_REQUEST(3, HeartbeatRequest.class),
+
+        HEARTBEAT_RESPONSE(4, HeartbeatResponse.class)
         ;
 
         private static final Map<Byte, MessageType> CODE_2_TYPE = new HashMap<>();

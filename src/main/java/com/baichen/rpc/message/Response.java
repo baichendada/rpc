@@ -3,12 +3,14 @@ package com.baichen.rpc.message;
 import lombok.Data;
 import lombok.Getter;
 
+import java.io.Serializable;
+
 /**
  * RPC 响应消息
  * 服务端返回给客户端的执行结果
  */
 @Data
-public class Response {
+public class Response implements Serializable {
 
     private Integer requestId;
 

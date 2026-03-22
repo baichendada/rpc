@@ -1,5 +1,18 @@
 # 更新日志
 
+## [v0.15] - 2026-03-22
+
+### 新增功能
+- **心跳机制 (Heartbeat)**：新增客户端-服务端双向心跳检测，保持连接活跃
+  - **`HeartbeatRequest`**：心跳请求消息，包含 `requestTime` 时间戳
+  - **`HeartbeatResponse`**：心跳响应消息，回显 `requestTime` 用于计算延迟
+  - **`HeartbeatHandler`**：心跳处理器，处理心跳请求/响应
+  - **`IdleStateHandler`**：空闲检测，30秒读空闲关闭连接，5秒写空闲发送心跳
+  - **MessageType 扩展**：新增 `HEARTBEAT_REQUEST(3)` 和 `HEARTBEAT_RESPONSE(4)` 消息类型
+- **ConnectionManager 心跳集成**：Consumer 端 ChannelPipeline 集成 HeartbeatHandler
+
+---
+
 ## [v0.14] - 2026-03-22
 
 ### 新增功能

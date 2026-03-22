@@ -2,6 +2,7 @@ package com.baichen.rpc.message;
 
 import lombok.Data;
 
+import java.io.Serializable;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -9,7 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 客户端发起远程调用时封装的信息
  */
 @Data
-public class Request {
+public class Request implements Serializable {
 
     private static final AtomicInteger ADDER = new AtomicInteger();
 
