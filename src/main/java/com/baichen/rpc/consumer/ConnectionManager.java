@@ -6,6 +6,7 @@ import com.baichen.rpc.codec.MessageEncoder;
 import com.baichen.rpc.compressor.Compressor;
 import com.baichen.rpc.compressor.CompressorManager;
 import com.baichen.rpc.handler.HeartbeatHandler;
+import com.baichen.rpc.handler.TrafficRecordHandler;
 import com.baichen.rpc.message.Response;
 import com.baichen.rpc.registry.ServiceMateData;
 import com.baichen.rpc.serializer.Serializer;
@@ -14,12 +15,14 @@ import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.handler.timeout.IdleStateHandler;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 相同地址的连接可以用连接管理器进行维护，避免重复创建连接浪费资源
@@ -62,10 +65,12 @@ public class ConnectionManager {
                     @Override
                     protected void initChannel(NioSocketChannel channel) throws Exception {
                         channel.pipeline()
+                                .addLast(new TrafficRecordHandler())
                                 // 1. 解码器：解码响应消息
                                 .addLast(new MessageDecoder())
                                 // 2. 编码器：编码请求消息
                                 .addLast(new MessageEncoder())
+                                .addLast(new IdleStateHandler(30, 5, 0, TimeUnit.SECONDS))
                                 .addLast(new HeartbeatHandler())
                                 // 3. 业务处理器：处理服务端响应
                                 .addLast(new ConsumerChannelHandler())

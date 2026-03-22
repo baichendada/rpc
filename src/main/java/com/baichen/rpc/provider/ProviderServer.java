@@ -6,6 +6,7 @@ import com.baichen.rpc.codec.MessageEncoder;
 import com.baichen.rpc.compressor.Compressor;
 import com.baichen.rpc.compressor.CompressorManager;
 import com.baichen.rpc.handler.HeartbeatHandler;
+import com.baichen.rpc.handler.TrafficRecordHandler;
 import com.baichen.rpc.limiter.ConcurrencyLimiter;
 import com.baichen.rpc.limiter.Limiter;
 import com.baichen.rpc.limiter.RateLimiter;
@@ -105,6 +106,7 @@ public class ProviderServer {
                         @Override
                         protected void initChannel(NioSocketChannel channel) throws Exception {
                             channel.pipeline()
+                                    .addLast(new TrafficRecordHandler())
                                     // 1. 解码器：解码请求消息
                                     .addLast(new MessageDecoder())
                                     // 2. 编码器：编码响应消息

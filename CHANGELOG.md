@@ -1,5 +1,16 @@
 # 更新日志
 
+## [v0.16] - 2026-03-22
+
+### 新增功能
+- **流量统计 (TrafficRecordHandler)**：新增流量统计处理器，记录上下行字节数
+  - **`TrafficRecordHandler`**：ChannelDuplexHandler，拦截 write 和 channelRead 统计 ByteBuf 流量
+  - **定时上报**：每 5 秒打印一次上下行流量统计
+  - **资源管理**：channelInactive 时取消定时任务，避免资源泄漏
+  - **双端集成**：Consumer 和 Provider 的 ChannelPipeline 均集成此 Handler
+
+---
+
 ## [v0.15] - 2026-03-22
 
 ### 新增功能
