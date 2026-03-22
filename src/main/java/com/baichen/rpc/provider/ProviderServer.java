@@ -1,5 +1,6 @@
 package com.baichen.rpc.provider;
 
+import com.alibaba.fastjson2.JSONObject;
 import com.baichen.rpc.codec.ChannelAttributes;
 import com.baichen.rpc.codec.MessageDecoder;
 import com.baichen.rpc.codec.MessageEncoder;
@@ -28,7 +29,10 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -44,6 +48,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 @Slf4j
 public class ProviderServer {
+
+    private static final Set<Class<?>> NON_RESOLVE_CAST_CLASSES = Set.of(int.class, long.class, double.class, float.class, boolean.class, char.class, byte.class, short.class,
+            Integer.class, Long.class, Double.class, Float.class, Boolean.class, Character.class, Byte.class, Short.class, String.class);
 
     private final ProviderProperties properties;
 
@@ -344,7 +351,7 @@ public class ProviderServer {
 
     @Data
     @AllArgsConstructor
-    private class InvokeThread implements Runnable{
+    private static class InvokeThread implements Runnable{
         private ChannelHandlerContext ctx;
         private Request req;
         private ProviderRegistry.InvokerInstance<?> invokerInstance;
@@ -360,14 +367,85 @@ public class ProviderServer {
                 return;
             }
             try {
-                Object result = invokerInstance.invoke(req.getMethodName(), req.getParamsClass(), req.getParams());
-                Response response = Response.success(result, req.getRequestId());
+                Class<?>[] paramTypes = resolveMethodParamTypes(req);
+                Object result = invokerInstance.invoke(req.getMethodName(), paramTypes, resolveMethodArgs(req, paramTypes));
+                Object finalResult = resolveResult(result, req);
+                Response response = Response.success(finalResult, req.getRequestId());
                 channelEventLoop.execute(() -> ctx.channel().writeAndFlush(response));
                 return;
             } catch (Exception e) {
                 log.error("调用服务实例失败: {}", e.getMessage());
-                Response response = new Response();
+                Response response = Response.fail(e.getMessage(), req.getRequestId());
                 channelEventLoop.execute(() -> ctx.channel().writeAndFlush(response));
+            }
+        }
+
+        private Object resolveResult(Object result, Request req) {
+            if (!req.isGenericInvoke()) {
+                return result;
+            }
+
+            if (result == null || NON_RESOLVE_CAST_CLASSES.contains(result.getClass())) {
+                return result;
+            }
+            return new HashMap<>(JSONObject.from(result));
+        }
+
+        @SuppressWarnings("all")
+        private Object[] resolveMethodArgs(Request req, Class<?>[] paramTypes) {
+            if (!req.isGenericInvoke()) {
+                return req.getParams();
+            }
+
+            Object[] params = req.getParams();
+            Object[] methodArgs = new Object[params.length];
+            for (int i = 0; i < params.length; i++) {
+                if (NON_RESOLVE_CAST_CLASSES.contains(paramTypes[i])) {
+                    methodArgs[i] = params[i];
+                } else {
+                    methodArgs[i] = new JSONObject((Map)params[i]).toJavaObject(paramTypes[i]);
+                }
+            }
+            return methodArgs;
+        }
+
+        private Class<?>[] resolveMethodParamTypes(Request req){
+            if (!req.isGenericInvoke()) {
+                return req.getParamsClass();
+            }
+
+            String[] paramsClassName = req.getParamsClassName();
+            Class<?>[] paramTypes = new Class[paramsClassName.length];
+            for (int i = 0; i < paramsClassName.length; i++) {
+                String classStr = paramsClassName[i];
+                paramTypes[i] = resolveType(classStr);
+            }
+            return paramTypes;
+        }
+
+        private Class<?> resolveType(String classStr) {
+            if ("int".equals(classStr)) {
+                return int.class;
+            } else if ("long".equals(classStr)) {
+                return long.class;
+            } else if ("double".equals(classStr)) {
+                return double.class;
+            } else if ("float".equals(classStr)) {
+                return float.class;
+            } else if ("boolean".equals(classStr)) {
+                return boolean.class;
+            } else if ("char".equals(classStr)) {
+                return char.class;
+            } else if ("byte".equals(classStr)) {
+                return byte.class;
+            } else if ("short".equals(classStr)) {
+                return short.class;
+            } else {
+                try {
+                    return Class.forName(classStr);
+                } catch (ClassNotFoundException e) {
+                    throw new RuntimeException("无法解析参数类型: " + classStr, e);
+                }
             }
         }
     }

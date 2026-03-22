@@ -6,4 +6,5 @@ import com.baichen.rpc.fallback.FallbackTag;
 public interface Add {
     int add(int a, int b);
     int minus(int a, int b);
+    User merge(User user1, User user2);
 }

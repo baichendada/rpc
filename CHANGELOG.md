@@ -1,5 +1,17 @@
 # 更新日志
 
+## [v0.19] - 2026-03-23
+
+### 新增功能
+- **泛化调用 (Generic Invoke)**：新增 `$invoke` 方法支持泛化 RPC 调用
+  - **`GenericConsumer` 接口**：`$invoke(serviceName, methodName, paramTypes, args)` 调用任意服务
+  - **Request 扩展**：新增 `genericInvoke`、`paramsClassName` 字段
+  - **类型解析**：Provider 端支持字符串类型名（`int`、`java.lang.String`）到 Class 对象的转换
+  - **参数解析**：泛化调用时将 Map 参数转换为目标类型对象
+  - **结果处理**：复杂对象自动序列化为 Map 返回
+
+---
+
 ## [v0.18] - 2026-03-23
 
 ### 新增功能

@@ -202,6 +202,7 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] 可插拔序列化（JSON / Hessian）
 - [x] 可插拔压缩（None / GZIP），消息体 ≤ 256 字节自动跳过压缩
 - [x] SPI 可插拔机制（基于 Java ServiceLoader），支持序列化器/压缩器/重试策略的热插拔
+- [x] 泛化调用（GenericConsumer），支持通过 `$invoke` 调用任意服务方法，无需接口依赖
 - [x] 统一编解码器（MessageEncoder/MessageDecoder），协议头新增版本号和序列化/压缩类型
 - [x] 心跳机制（HeartbeatHandler + IdleStateHandler），支持双向心跳检测和空闲连接关闭
 - [x] 流量统计（TrafficRecordHandler），Consumer/Provider 双端统计上下行流量，每 5 秒打印

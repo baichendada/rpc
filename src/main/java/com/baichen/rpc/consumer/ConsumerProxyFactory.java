@@ -141,11 +141,13 @@ public class ConsumerProxyFactory {
          * 执行远程 RPC 调用
          */
         private Object invokeRemote(Method method, Object[] args) throws Exception {
+            boolean genericInvoke = "$invoke".equals(method.getName());
+            String serviceName = genericInvoke ? args[0].toString() : interfaceClass.getName();
             // 从注册中心获取服务地址
-            List<ServiceMateData> serviceMateDataList = new ArrayList<>(serviceRegistry.fetchSeviceList(interfaceClass.getName()));
+            List<ServiceMateData> serviceMateDataList = new ArrayList<>(serviceRegistry.fetchSeviceList(serviceName));
             log.info("从注册中心获取到服务列表: {}", serviceMateDataList);
             if (serviceMateDataList.isEmpty()) {
-                throw new RpcException("未找到服务 " + interfaceClass.getName() + " 的注册信息");
+                throw new RpcException("未找到服务 " + serviceName + " 的注册信息");
             }
 
             ServiceMateData service;
@@ -275,11 +277,20 @@ public class ConsumerProxyFactory {
          * 构建 RPC 请求
          */
         private Request buildRequest(Method method, Object[] args) {
+            boolean genericInvoke = "$invoke".equals(method.getName());
             Request request = new Request();
-            request.setServiceName(interfaceClass.getName());
-            request.setMethodName(method.getName());
-            request.setParamsClass(method.getParameterTypes());
-            request.setParams(args);
+            request.setGenericInvoke(genericInvoke);
+            if (genericInvoke) {
+                request.setServiceName(args[0].toString());
+                request.setMethodName(args[1].toString());
+                request.setParamsClassName((String[]) args[2]);
+                request.setParams((Object[]) args[3]);
+            } else {
+                request.setServiceName(interfaceClass.getName());
+                request.setMethodName(method.getName());
+                request.setParamsClass(method.getParameterTypes());
+                request.setParams(args);
+            }
             return request;
         }
     }

@@ -10,4 +10,9 @@ public class AddFallbackImpl implements Add {
     public int minus(int a, int b) {
         return 0;
     }
+
+    @Override
+    public User merge(User user1, User user2) {
+        return null;
+    }
 }

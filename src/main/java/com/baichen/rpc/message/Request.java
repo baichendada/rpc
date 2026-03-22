@@ -29,10 +29,14 @@ public class Request implements Serializable {
      */
     private String methodName;
 
+    private boolean genericInvoke = false;
+
     /**
      * 参数类型列表，用于方法反射调用
      */
     private Class<?>[] paramsClass;
+
+    private String[] paramsClassName;
 
     /**
      * 参数值列表，方法调用的实际参数
