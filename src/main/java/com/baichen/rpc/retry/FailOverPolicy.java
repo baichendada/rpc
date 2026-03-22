@@ -4,11 +4,13 @@ import com.baichen.rpc.exception.RpcException;
 import com.baichen.rpc.loaderbalance.LoaderBalancer;
 import com.baichen.rpc.message.Response;
 import com.baichen.rpc.registry.ServiceMateData;
+import com.baichen.rpc.spi.SpiTag;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+@SpiTag("failOver")
 public class FailOverPolicy implements RetryPolicy {
     @Override
     public Response retry(RetryContext context) throws Exception {

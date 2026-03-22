@@ -33,7 +33,7 @@ public class MessageEncoder extends MessageToByteEncoder<Object> {
         // 2. 序列化消息体；小消息不压缩，将压缩码替换为 NONE
         byte[] body = defaultSerializer.serialize(msg);
         if (body.length <= 256) {
-            serializeTypeCode = (byte) ((defaultSACType & 0xF0) | Compressor.CompressorType.NONE.getCode());
+            serializeTypeCode &= (byte) 0xF0;
         } else {
             body = defaultCompressor.compress(body);
         }
@@ -55,12 +55,12 @@ public class MessageEncoder extends MessageToByteEncoder<Object> {
             return;
         }
         SerializerManager serializerManager = ctx.channel().attr(ChannelAttributes.SERIALIZER_MANAGER).get();
-        Byte serializerCode = ctx.channel().attr(ChannelAttributes.SERIALIZER_KEY).get();
-        defaultSerializer = serializerManager.getSerializerByCode(serializerCode);
+        String serializerStr = ctx.channel().attr(ChannelAttributes.SERIALIZER_KEY).get();
+        defaultSerializer = serializerManager.getSerializer(serializerStr);
 
         CompressorManager compressorManager = ctx.channel().attr(ChannelAttributes.COMPRESSOR_MANAGER).get();
-        Byte compressorCode = ctx.channel().attr(ChannelAttributes.COMPRESSOR_KEY).get();
-        defaultCompressor = compressorManager.getCompressorByCode(compressorCode);
+        String compressorStr = ctx.channel().attr(ChannelAttributes.COMPRESSOR_KEY).get();
+        defaultCompressor = compressorManager.getCompressor(compressorStr);
 
         if (defaultSerializer == null) {
             throw new IllegalArgumentException("缺少序列化器");
@@ -69,6 +69,6 @@ public class MessageEncoder extends MessageToByteEncoder<Object> {
             throw new IllegalArgumentException("缺少压缩器");
         }
 
-        defaultSACType = (byte) (serializerCode << 4 | compressorCode);
+        defaultSACType = (byte) (defaultSerializer.getCode() << 4 | defaultCompressor.getCode());
     }
 }

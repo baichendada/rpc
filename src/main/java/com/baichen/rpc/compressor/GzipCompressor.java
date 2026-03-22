@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.util.Locale;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -27,5 +28,15 @@ public class GzipCompressor implements Compressor {
         } catch (Exception e) {
             throw new RuntimeException("decompress error", e);
         }
+    }
+
+    @Override
+    public String getName() {
+        return "gzip";
+    }
+
+    @Override
+    public int getCode() {
+        return 1;
     }
 }

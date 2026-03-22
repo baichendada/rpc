@@ -127,8 +127,8 @@ public class ConnectionManager {
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
             log.info("channel active: {}", ctx.channel().remoteAddress());
-            ctx.channel().attr(ChannelAttributes.SERIALIZER_KEY).set(Serializer.SerializerType.valueOf(properties.getSerializerType().toUpperCase(Locale.ROOT)).getCode());
-            ctx.channel().attr(ChannelAttributes.COMPRESSOR_KEY).set(Compressor.CompressorType.valueOf(properties.getCompressorType().toUpperCase(Locale.ROOT)).getCode());
+            ctx.channel().attr(ChannelAttributes.SERIALIZER_KEY).set(properties.getSerializerType().toUpperCase(Locale.ROOT));
+            ctx.channel().attr(ChannelAttributes.COMPRESSOR_KEY).set(properties.getCompressorType().toUpperCase(Locale.ROOT));
             ctx.channel().attr(ChannelAttributes.SERIALIZER_MANAGER).set(serializerManager);
             ctx.channel().attr(ChannelAttributes.COMPRESSOR_MANAGER).set(compressorManager);
             ctx.fireChannelActive();

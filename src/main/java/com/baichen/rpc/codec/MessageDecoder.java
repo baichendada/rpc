@@ -76,8 +76,8 @@ public class MessageDecoder extends LengthFieldBasedFrameDecoder {
             byte SACType = decode.readByte();
             byte serializerCode = (byte) (SACType >>> 4);
             byte compressorCode = (byte) (SACType & 0b00001111);
-            Serializer serializer = serializerManager.getSerializerByCode(serializerCode);
-            Compressor compressor = compressorManager.getCompressorByCode(compressorCode);
+            Serializer serializer = serializerManager.getSerializer(serializerCode);
+            Compressor compressor = compressorManager.getCompressor(compressorCode);
             if (serializer == null || compressor == null) {
                 throw new IllegalArgumentException("缺少序列化器或压缩器");
             }

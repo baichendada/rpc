@@ -1,0 +1,2 @@
+com.baichen.rpc.compressor.GzipCompressor
+com.baichen.rpc.compressor.NoneCompressor

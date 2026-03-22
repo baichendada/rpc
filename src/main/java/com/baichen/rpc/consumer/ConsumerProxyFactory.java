@@ -25,6 +25,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.*;
 
 /**
@@ -42,7 +43,7 @@ public class ConsumerProxyFactory {
 
     private final LoaderBalancer balancer;
 
-    private final RetryPolicy retryPolicy;
+    private final RetryPolicyManager retryPolicyManager;
 
     private final InFlightRequestManager inFlightRequestManager;
 
@@ -55,7 +56,7 @@ public class ConsumerProxyFactory {
         this.serviceRegistry = new DefaultServiceRegistry(properties.getServiceRegistryConfig());
         this.serviceRegistry.init(properties.getServiceRegistryConfig());
         this.balancer = createLoaderBalancer(properties.getLoadBalancePolicy());
-        this.retryPolicy = createRetryPolicy(properties.getRetryPolicy());
+        this.retryPolicyManager = new RetryPolicyManager();
         this.inFlightRequestManager = new InFlightRequestManager(properties);
         this.connectionManager = new ConnectionManager(properties, inFlightRequestManager);
         this.breakerManager = new CircuitBreakerManager(properties);
@@ -75,7 +76,7 @@ public class ConsumerProxyFactory {
     @SuppressWarnings("unchecked")
     public <I> I createConsumerProxy(Class<I> interfaceClass) {
         return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(), new Class[]{interfaceClass}
-                , new ConsumerInvocationHandler(interfaceClass, balancer));
+                , new ConsumerInvocationHandler(interfaceClass, balancer, createRetryPolicy(properties.getRetryPolicy())));
     }
 
     private LoaderBalancer createLoaderBalancer(String loadBalancePolicy) {
@@ -91,18 +92,11 @@ public class ConsumerProxyFactory {
     }
 
     private RetryPolicy createRetryPolicy(String retryPolicy) {
-        switch (retryPolicy) {
-            case "retrySame" -> {
-                return new RetrySamePolicy();
-            }
-            case "failOver" -> {
-                return new FailOverPolicy();
-            }
-            case "forkAll" -> {
-                return new ForkAllPolicy();
-            }
-            default -> throw new IllegalArgumentException("Unsupported retry policy: " + retryPolicy);
+        RetryPolicy retryPolicy1 = retryPolicyManager.getRetryPolicy(retryPolicy.toUpperCase(Locale.ROOT));
+        if (retryPolicy1 == null) {
+            throw new IllegalArgumentException("Unsupported retry policy: " + retryPolicy);
         }
+        return retryPolicy1;
     }
 
 
@@ -112,9 +106,12 @@ public class ConsumerProxyFactory {
 
         private final LoaderBalancer balancer;
 
-        private ConsumerInvocationHandler(Class<?> interfaceClass, LoaderBalancer balancer) {
+        private final RetryPolicy retryPolicy;
+
+        private ConsumerInvocationHandler(Class<?> interfaceClass, LoaderBalancer balancer, RetryPolicy retryPolicy) {
             this.interfaceClass = interfaceClass;
             this.balancer = balancer;
+            this.retryPolicy = retryPolicy;
         }
 
         @Override

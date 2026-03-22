@@ -3,12 +3,14 @@ package com.baichen.rpc.retry;
 import com.baichen.rpc.exception.RpcException;
 import com.baichen.rpc.message.Response;
 import com.baichen.rpc.registry.ServiceMateData;
+import com.baichen.rpc.spi.SpiTag;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
+@SpiTag("forkAll")
 public class ForkAllPolicy implements RetryPolicy {
     @Override
     public Response retry(RetryContext context) {

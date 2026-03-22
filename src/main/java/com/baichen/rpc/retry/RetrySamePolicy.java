@@ -1,11 +1,14 @@
 package com.baichen.rpc.retry;
 
 import com.baichen.rpc.message.Response;
+import com.baichen.rpc.spi.SpiTag;
 
+import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
+@SpiTag("retrySame")
 public class RetrySamePolicy implements RetryPolicy {
 
     private final Random random = new Random();

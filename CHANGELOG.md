@@ -1,5 +1,19 @@
 # 更新日志
 
+## [v0.18] - 2026-03-23
+
+### 新增功能
+- **SPI 可插拔机制**：基于 Java SPI ServiceLoader 实现扩展加载
+  - **`Extension` 接口**：所有可扩展组件的基接口，定义 `getName()` 和 `getCode()`
+  - **`SpiTag` 注解**：标注扩展实现类的名称
+  - **`RetryPolicyManager`**：通过 SPI 加载 RetryPolicy 实现
+- **序列化/压缩器 SPI 化**：移除硬编码的枚举 Map，改用 ServiceLoader 加载
+  - **`SerializerManager`**：支持通过 code 或 name 查找序列化器
+  - **`CompressorManager`**：支持通过 code 或 name 查找压缩器
+- **ChannelAttributes 优化**：序列化/压缩器 key 从 Byte 改为 String 类型
+
+---
+
 ## [v0.17] - 2026-03-22
 
 ### 新增功能

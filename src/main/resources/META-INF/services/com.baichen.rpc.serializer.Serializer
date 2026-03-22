@@ -1,0 +1,2 @@
+com.baichen.rpc.serializer.HessianSerializer
+com.baichen.rpc.serializer.JsonSerializer

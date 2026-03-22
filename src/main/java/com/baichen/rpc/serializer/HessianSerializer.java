@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.util.Locale;
 
 @Slf4j
 public class HessianSerializer implements Serializer {
@@ -31,5 +32,15 @@ public class HessianSerializer implements Serializer {
             log.error("HessianSerializer deserialize error", e);
             return null;
         }
+    }
+
+    @Override
+    public String getName() {
+        return "hessian";
+    }
+
+    @Override
+    public int getCode() {
+        return 1;
     }
 }
