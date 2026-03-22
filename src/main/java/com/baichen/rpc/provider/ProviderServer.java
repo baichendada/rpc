@@ -1,7 +1,10 @@
 package com.baichen.rpc.provider;
 
+import com.baichen.rpc.codec.ChannelAttributes;
 import com.baichen.rpc.codec.MessageDecoder;
-import com.baichen.rpc.codec.ResponseEncoder;
+import com.baichen.rpc.codec.MessageEncoder;
+import com.baichen.rpc.compressor.Compressor;
+import com.baichen.rpc.compressor.CompressorManager;
 import com.baichen.rpc.limiter.ConcurrencyLimiter;
 import com.baichen.rpc.limiter.Limiter;
 import com.baichen.rpc.limiter.RateLimiter;
@@ -11,6 +14,8 @@ import com.baichen.rpc.registry.DefaultServiceRegistry;
 import com.baichen.rpc.registry.ServiceMateData;
 import com.baichen.rpc.registry.ServiceRegistry;
 import com.baichen.rpc.registry.ServiceRegistryConfig;
+import com.baichen.rpc.serializer.Serializer;
+import com.baichen.rpc.serializer.SerializerManager;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -19,6 +24,7 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.util.AttributeKey;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Locale;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -62,6 +68,10 @@ public class ProviderServer {
      */
     private EventLoopGroup workerEventGroup;
 
+    private final SerializerManager serializerManager;
+
+    private final CompressorManager compressorManager;
+
     ProviderServer(ProviderProperties properties) throws Exception {
         this.host = properties.getHost();
         this.port = properties.getPort();
@@ -70,6 +80,8 @@ public class ProviderServer {
         this.serviceRegistry.init(properties.getServiceRegistryConfig());
         this.properties = properties;
         this.globalLimiter = new ConcurrencyLimiter(properties.getGlobalLimit());
+        this.serializerManager = new SerializerManager();
+        this.compressorManager = new CompressorManager();
     }
 
     /**
@@ -94,7 +106,7 @@ public class ProviderServer {
                                     // 1. 解码器：解码请求消息
                                     .addLast(new MessageDecoder())
                                     // 2. 编码器：编码响应消息
-                                    .addLast(new ResponseEncoder())
+                                    .addLast(new MessageEncoder())
                                     // 3. 限流器：全局和接口限流
                                     .addLast(new LimiterServerHandler())
                                     // 4. 业务处理器：处理请求并返回响应
@@ -295,6 +307,11 @@ public class ProviderServer {
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
             log.info("channel active: {}", ctx.channel().remoteAddress());
+            ctx.channel().attr(ChannelAttributes.SERIALIZER_KEY).set(Serializer.SerializerType.valueOf(properties.getSerializerType().toUpperCase(Locale.ROOT)).getCode());
+            ctx.channel().attr(ChannelAttributes.COMPRESSOR_KEY).set(Compressor.CompressorType.valueOf(properties.getCompressorType().toUpperCase(Locale.ROOT)).getCode());
+            ctx.channel().attr(ChannelAttributes.SERIALIZER_MANAGER).set(serializerManager);
+            ctx.channel().attr(ChannelAttributes.COMPRESSOR_MANAGER).set(compressorManager);
+            ctx.fireChannelActive();
         }
 
         @Override

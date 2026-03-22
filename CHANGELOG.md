@@ -1,5 +1,36 @@
 # 更新日志
 
+## [v0.14] - 2026-03-22
+
+### 新增功能
+- **可插拔序列化**：新增 `Serializer` 接口及两种实现
+  - `JsonSerializer`：基于 fastjson2，默认序列化方式
+  - `HessianSerializer`：基于 Caucho Hessian 4.0.66，二进制序列化，性能更好
+  - `SerializerManager`：序列化器注册中心，通过 code 查找实现
+- **可插拔压缩**：新增 `Compressor` 接口及两种实现
+  - `NoneCompressor`：直通（不压缩），默认压缩方式
+  - `GzipCompressor`：GZIP 压缩，适用于大消息体
+  - `CompressorManager`：压缩器注册中心，通过 code 查找实现
+- **统一编解码器**：新增 `MessageEncoder`，替换原有的 `RequestEncoder` 和 `ResponseEncoder`
+- **协议版本字段**：新增 `Version` 枚举，协议头增加 2 字节版本号
+- **协议升级**：协议头新增 `Version(2B)` 和 `SACType(1B)` 字段
+  - `SACType` 上四位 = 序列化类型，下四位 = 压缩类型
+  - 消息体 ≤ 256 字节时自动跳过压缩，使用 NONE 压缩码
+- **配置项新增**：`ConsumerProperties` 和 `ProviderProperties` 新增 `serializerType`、`compressorType` 字段
+
+### 代码修复
+- **压缩码 bug 修复** ⚠️ **CRITICAL**：小消息体原先将压缩码置为 0（未注册），导致解码端找不到压缩器而报错；修复为写入 `NONE.getCode()`
+- **GzipCompressor 资源泄漏修复** ⚠️ **IMPORTANT**：`GZIPOutputStream`/`GZIPInputStream` 未关闭，导致 native Deflater/Inflater 内存泄漏；改用 try-with-resources 正确关闭
+- **HessianSerializer 异常处理修复**：序列化失败时原先返回空字节数组，导致下游静默失败；改为抛出 `RuntimeException`
+
+### 架构改进
+- **ChannelAttributes 共享类**：提取 `AttributeKey` 常量到 `ChannelAttributes`，消除 `MessageEncoder`/`MessageDecoder` 重复定义，避免字符串 key 不一致的隐患
+
+### 依赖更新
+- 新增 `com.caucho:hessian:4.0.66`
+
+---
+
 ## [v0.13] - 2026-03-22
 
 ### 新增功能

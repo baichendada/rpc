@@ -1,9 +1,14 @@
 package com.baichen.rpc.consumer;
 
+import com.baichen.rpc.codec.ChannelAttributes;
 import com.baichen.rpc.codec.MessageDecoder;
-import com.baichen.rpc.codec.RequestEncoder;
+import com.baichen.rpc.codec.MessageEncoder;
+import com.baichen.rpc.compressor.Compressor;
+import com.baichen.rpc.compressor.CompressorManager;
 import com.baichen.rpc.message.Response;
 import com.baichen.rpc.registry.ServiceMateData;
+import com.baichen.rpc.serializer.Serializer;
+import com.baichen.rpc.serializer.SerializerManager;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -11,6 +16,7 @@ import io.netty.channel.socket.nio.NioSocketChannel;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -33,11 +39,17 @@ public class ConnectionManager {
      */
     private final EventLoopGroup workerGroup;
 
+    private final SerializerManager serializerManager;
+
+    private final CompressorManager compressorManager;
+
     public ConnectionManager(ConsumerProperties properties, InFlightRequestManager inFlightRequestManager) {
         this.properties = properties;
         this.workerGroup = new NioEventLoopGroup(properties.getWorkerThreadNum());
         this.bootstrap = createBootStrap();
         this.inFlightRequestManager = inFlightRequestManager;
+        this.serializerManager = new SerializerManager();
+        this.compressorManager = new CompressorManager();
     }
 
     private Bootstrap createBootStrap() {
@@ -52,7 +64,7 @@ public class ConnectionManager {
                                 // 1. 解码器：解码响应消息
                                 .addLast(new MessageDecoder())
                                 // 2. 编码器：编码请求消息
-                                .addLast(new RequestEncoder())
+                                .addLast(new MessageEncoder())
                                 // 3. 业务处理器：处理服务端响应
                                 .addLast(new ConsumerChannelHandler())
                                 // 4. 调试用：捕获未处理的消息
@@ -108,6 +120,11 @@ public class ConnectionManager {
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
             log.info("channel active: {}", ctx.channel().remoteAddress());
+            ctx.channel().attr(ChannelAttributes.SERIALIZER_KEY).set(Serializer.SerializerType.valueOf(properties.getSerializerType().toUpperCase(Locale.ROOT)).getCode());
+            ctx.channel().attr(ChannelAttributes.COMPRESSOR_KEY).set(Compressor.CompressorType.valueOf(properties.getCompressorType().toUpperCase(Locale.ROOT)).getCode());
+            ctx.channel().attr(ChannelAttributes.SERIALIZER_MANAGER).set(serializerManager);
+            ctx.channel().attr(ChannelAttributes.COMPRESSOR_MANAGER).set(compressorManager);
+            ctx.fireChannelActive();
         }
 
         @Override

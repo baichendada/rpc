@@ -10,5 +10,7 @@ public class ProviderProperties {
     private Integer workerThreadNum = 4;
     private Integer globalLimit = 100;
     private Integer serviceLimit = 3;
+    private String serializerType = "json";
+    private String compressorType = "none";
     private ServiceRegistryConfig serviceRegistryConfig;
 }

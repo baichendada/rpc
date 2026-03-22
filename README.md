@@ -10,6 +10,7 @@
 - **Lombok** - 简化代码
 - **Logback** - 日志框架
 - **Curator** - Zookeeper 服务发现框架
+- **Hessian 4.0.66** - 二进制序列化框架
 
 ## 项目结构
 
@@ -67,6 +68,16 @@ src/main/java/com/baichen/rpc/
     └── DefaultFallback.java      # 默认降级（缓存优先，缓存未命中走 Mock）
 └── metrics/         # 指标数据
     └── MetricsData.java          # RPC 调用指标（成功/失败/耗时/结果）
+└── serializer/      # 序列化
+    ├── Serializer.java           # 序列化接口
+    ├── SerializerManager.java    # 序列化器注册中心
+    ├── JsonSerializer.java       # JSON 序列化（fastjson2）
+    └── HessianSerializer.java    # Hessian 二进制序列化
+└── compressor/      # 压缩
+    ├── Compressor.java           # 压缩接口
+    ├── CompressorManager.java    # 压缩器注册中心
+    ├── NoneCompressor.java       # 直通（不压缩）
+    └── GzipCompressor.java       # GZIP 压缩
 ```
 
 ## 通信协议
@@ -74,16 +85,18 @@ src/main/java/com/baichen/rpc/
 自定义二进制协议，格式如下：
 
 ```
-+-----------+--------+--------+----------+
-|  Length   |  Magic |  Type  |   Body   |
-+-----------+--------+--------+----------+
-|   4B     |   6B   |   1B   |   N B    |
-+-----------+--------+--------+----------+
++-----------+--------+--------+---------+---------+--------+
+|  Length   |  Magic |  Type  | Version | SACType |  Body  |
++-----------+--------+--------+---------+---------+--------+
+|   4B      |   6B   |   1B   |   2B    |   1B    |  N B   |
++-----------+--------+--------+---------+---------+--------+
 
 - Length:  整个消息的长度（不包括 Length 字段本身）
 - Magic:   魔数 "baichen"，用于协议校验
 - Type:    消息类型 (1=Request, 2=Response)
-- Body:    消息体，JSON 格式
+- Version: 协议版本 (1=V1)
+- SACType: 上四位=序列化类型，下四位=压缩类型
+- Body:    消息体，按序列化类型编码
 ```
 
 ### 响应码
@@ -186,6 +199,9 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] 限流器与 RPC 框架集成（全局并发限流 + 单服务速率限流）
 - [x] 熔断器（基于响应时间的滑动窗口熔断）
 - [x] 降级机制（缓存降级 + Mock 降级，支持 @FallbackTag 注解）
+- [x] 可插拔序列化（JSON / Hessian）
+- [x] 可插拔压缩（None / GZIP），消息体 ≤ 256 字节自动跳过压缩
+- [x] 统一编解码器（MessageEncoder/MessageDecoder），协议头新增版本号和序列化/压缩类型
 
 ## 限流策略
 

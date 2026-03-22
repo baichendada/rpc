@@ -41,6 +41,9 @@ public class ConsumerProperties {
     /** 重试策略：forkAll（并行重试）、failOver（故障转移）、retrySame（同一服务重试） */
     private String retryPolicy = "forkAll";
 
+    private String serializerType = "json";
+    private String compressorType = "none";
+
     /** 服务注册中心配置 */
     private ServiceRegistryConfig serviceRegistryConfig;
 }
