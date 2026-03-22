@@ -59,6 +59,14 @@ src/main/java/com/baichen/rpc/
     ├── RateLimiter.java          # 速率限流器（令牌桶算法）
     ├── ConcurrencyLimiter.java   # 并发限流器
     └── timeAreaLimiter.java      # 时间窗口限流器（已废弃）
+└── fallback/        # 降级机制
+    ├── Fallback.java             # 降级接口
+    ├── FallbackTag.java          # 降级实现类注解
+    ├── CacheFallback.java        # 缓存降级（返回上次成功结果）
+    ├── MockFallback.java         # Mock 降级（反射调用注解指定实现类）
+    └── DefaultFallback.java      # 默认降级（缓存优先，缓存未命中走 Mock）
+└── metrics/         # 指标数据
+    └── MetricsData.java          # RPC 调用指标（成功/失败/耗时/结果）
 ```
 
 ## 通信协议
@@ -177,6 +185,7 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] 限流器（速率限流、并发限流）
 - [x] 限流器与 RPC 框架集成（全局并发限流 + 单服务速率限流）
 - [x] 熔断器（基于响应时间的滑动窗口熔断）
+- [x] 降级机制（缓存降级 + Mock 降级，支持 @FallbackTag 注解）
 
 ## 限流策略
 
@@ -200,9 +209,9 @@ RPC 框架支持两级限流保护：
 ## 待完善功能
 
 - [ ] 多种序列化方式（Hessian、Protobuf）
-- [ ] 服务降级
 - [ ] Redis 注册中心实现
 - [ ] 限流器配置动态化（支持运行时调整）
+- [ ] 降级策略配置化（支持运行时切换）
 
 ---
 

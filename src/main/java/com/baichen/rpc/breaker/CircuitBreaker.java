@@ -1,6 +1,6 @@
 package com.baichen.rpc.breaker;
 
-import com.baichen.metrics.MetricsData;
+import com.baichen.rpc.metrics.MetricsData;
 
 public interface CircuitBreaker {
 

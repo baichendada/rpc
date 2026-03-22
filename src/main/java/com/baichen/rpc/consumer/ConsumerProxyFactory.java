@@ -1,6 +1,10 @@
 package com.baichen.rpc.consumer;
 
-import com.baichen.metrics.MetricsData;
+import com.baichen.rpc.fallback.CacheFallback;
+import com.baichen.rpc.fallback.DefaultFallback;
+import com.baichen.rpc.fallback.Fallback;
+import com.baichen.rpc.fallback.MockFallback;
+import com.baichen.rpc.metrics.MetricsData;
 import com.baichen.rpc.breaker.CircuitBreaker;
 import com.baichen.rpc.breaker.CircuitBreakerManager;
 import com.baichen.rpc.exception.RpcException;
@@ -44,6 +48,8 @@ public class ConsumerProxyFactory {
 
     private final CircuitBreakerManager breakerManager;
 
+    private final Fallback fallback;
+
     public ConsumerProxyFactory(ConsumerProperties properties) throws Exception {
         this.properties = properties;
         this.serviceRegistry = new DefaultServiceRegistry(properties.getServiceRegistryConfig());
@@ -53,6 +59,7 @@ public class ConsumerProxyFactory {
         this.inFlightRequestManager = new InFlightRequestManager(properties);
         this.connectionManager = new ConnectionManager(properties, inFlightRequestManager);
         this.breakerManager = new CircuitBreakerManager(properties);
+        this.fallback = new DefaultFallback(new CacheFallback(), new MockFallback());
     }
 
     /**
@@ -146,26 +153,38 @@ public class ConsumerProxyFactory {
             if (serviceMateDataList.isEmpty()) {
                 throw new RpcException("未找到服务 " + interfaceClass.getName() + " 的注册信息");
             }
-            ServiceMateData service = decideService(serviceMateDataList);
+
+            ServiceMateData service;
+            // decideService throws RpcException when all nodes are circuit-broken
+            try {
+                service = decideService(serviceMateDataList);
+            } catch (RpcException e) {
+                MetricsData metricsData0 = MetricsData.create(method, args, null);
+                return fallback.fallback(metricsData0);
+            }
+            MetricsData metricsData = MetricsData.create(method, args, service);
 
             // 构建并发送请求
             Request request = buildRequest(method, args);
-            MetricsData metricsData = MetricsData.create(method, args, service);
             CircuitBreaker circuitBreaker = breakerManager.getOrCreateBreaker(service);
-            Response resp = null;
             try {
                 CompletableFuture<Response> future = callRpcAsync(request, service);
                 // 等待响应并返回结果
-                resp =  future.get(properties.getWaitResponseTimeoutMs(), TimeUnit.MILLISECONDS);
-                metricsData.complete();
+                Response resp =  future.get(properties.getWaitResponseTimeoutMs(), TimeUnit.MILLISECONDS);
+                metricsData.complete(resp.getResult());
+                fallback.recordMetrics(metricsData);
                 circuitBreaker.recordRpc(metricsData);
+                return postProcessResponse(resp);
             } catch (Exception e) {
                 metricsData.completeWithException(e);
                 circuitBreaker.recordRpc(metricsData);
-                return doRetry(metricsData, service);
             }
 
-            return postProcessResponse(resp, metricsData);
+            try {
+                return postProcessResponse(doRetry(metricsData, service));
+            } catch (Exception e) {
+                return fallback.fallback(metricsData);
+            }
         }
 
         private ServiceMateData decideService(List<ServiceMateData> serviceMateDataList) {
@@ -181,11 +200,11 @@ public class ConsumerProxyFactory {
             throw new RpcException("No more service to call");
         }
 
-        private Object postProcessResponse(Response resp, MetricsData metricsData) {
+        private Object postProcessResponse(Response resp) {
             return resp.getResult();
         }
 
-        private Object doRetry(MetricsData metricsData, ServiceMateData service) throws Exception {
+        private Response doRetry(MetricsData metricsData, ServiceMateData service) throws Exception {
             Throwable e = metricsData.getT();
             // 检查是否应该重试
             if (e instanceof ExecutionException ee) {
@@ -212,7 +231,7 @@ public class ConsumerProxyFactory {
             context.setTotalTimeoutMs(properties.getTotalTimeoutMs() - metricsData.getDuration());
             context.setRetryFunction(retryService -> {
                 CompletableFuture<Response> future;
-                CircuitBreaker circuitBreaker = breakerManager.getOrCreateBreaker(service);
+                CircuitBreaker circuitBreaker = breakerManager.getOrCreateBreaker(retryService);
                 if (!circuitBreaker.allowRequest()) {
                     future = new CompletableFuture<>();
                     future.completeExceptionally(new RpcException("短路器已打开，无法调用服务 " + retryService.getHost() + ":" + retryService.getPort()));
@@ -225,13 +244,13 @@ public class ConsumerProxyFactory {
                     if (t != null) {
                         metricsData1.completeWithException(t);
                     } else {
-                        metricsData1.complete();
+                        metricsData1.complete(r.getResult());
                     }
                     circuitBreaker.recordRpc(metricsData1);
                 });
                 return future;
             });
-            return retryPolicy.retry(context).getResult();
+            return retryPolicy.retry(context);
         }
 
         /**

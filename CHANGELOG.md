@@ -1,5 +1,31 @@
 # 更新日志
 
+## [v0.13] - 2026-03-22
+
+### 新增功能
+- **降级机制 (Fallback)**：RPC 调用失败时自动降级，避免异常扩散
+  - **`Fallback` 接口**：定义 `fallback()` 和 `recordMetrics()` 两个方法
+  - **`CacheFallback`**：缓存上次成功调用的返回值，降级时返回缓存结果（以方法+参数为 key）
+  - **`MockFallback`**：通过 `@FallbackTag` 注解找到降级实现类，反射调用对应方法
+  - **`DefaultFallback`**：链式降级策略，优先走缓存，缓存未命中再走 Mock
+  - **`@FallbackTag` 注解**：标注在服务接口上，指定降级实现类
+  - **`AddFallbackImpl`**：演示用降级实现，add/minus 均返回 0
+
+### 集成变更
+- **ConsumerProxyFactory 集成降级**：
+  - 所有节点均被熔断（`decideService` 抛异常）时，触发降级
+  - RPC 调用成功后，通过 `fallback.recordMetrics()` 更新缓存
+  - 重试全部失败后，触发降级而非直接抛出异常
+
+### 代码修复
+- **MetricsData 新增 `result` 字段**：`complete(Object result)` 保存调用结果，供 `CacheFallback` 使用
+- **doRetry lambda 熔断器修复** ⚠️ **CRITICAL**：重试 lambda 中使用 `retryService` 的熔断器而非原始 `service` 的熔断器
+
+### 包结构修复
+- **MetricsData 包迁移**：从 `com.baichen.metrics` 迁移到 `com.baichen.rpc.metrics`，统一包结构
+
+---
+
 ## [v0.12] - 2026-03-16
 
 ### 新增功能

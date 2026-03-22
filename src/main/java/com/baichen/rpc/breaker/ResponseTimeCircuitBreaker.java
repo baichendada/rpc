@@ -1,6 +1,6 @@
 package com.baichen.rpc.breaker;
 
-import com.baichen.metrics.MetricsData;
+import com.baichen.rpc.metrics.MetricsData;
 import lombok.Data;
 
 import java.util.concurrent.atomic.AtomicInteger;
