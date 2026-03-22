@@ -1,5 +1,15 @@
 # 更新日志
 
+## [v0.17] - 2026-03-22
+
+### 新增功能
+- **业务处理线程池**：ProviderServer 新增独立线程池处理 RPC 请求
+  - **`ThreadPoolExecutor`**：核心/最大线程数 4，队列容量 1
+  - **`InvokeThread`**：封装请求处理任务，结果通过 `channelEventLoop.execute()` 写回
+  - **`FastFailRejectedHandler`**：线程池满时直接返回 "服务繁忙" 响应，不抛异常
+
+---
+
 ## [v0.16] - 2026-03-22
 
 ### 新增功能

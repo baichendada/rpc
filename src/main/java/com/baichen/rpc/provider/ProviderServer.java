@@ -24,10 +24,12 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.AttributeKey;
+import lombok.AllArgsConstructor;
+import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.Locale;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -71,6 +73,8 @@ public class ProviderServer {
      */
     private EventLoopGroup workerEventGroup;
 
+    private ThreadPoolExecutor invokerThreadPool;
+
     private final SerializerManager serializerManager;
 
     private final CompressorManager compressorManager;
@@ -99,6 +103,7 @@ public class ProviderServer {
             // workerEventGroup: 4 个线程处理 IO 读写
             bossEventGroup = new NioEventLoopGroup();
             workerEventGroup = new NioEventLoopGroup(properties.getWorkerThreadNum());
+            invokerThreadPool = new ThreadPoolExecutor(4, 4, 10L, TimeUnit.SECONDS, new ArrayBlockingQueue<>(1), new FastFailRejectedHandler());
 
             bs.group(bossEventGroup, workerEventGroup)
                     .channel(NioServerSocketChannel.class)
@@ -158,6 +163,9 @@ public class ProviderServer {
         }
         if (workerEventGroup != null) {
             workerEventGroup.shutdownGracefully();
+        }
+        if (invokerThreadPool != null) {
+            invokerThreadPool.shutdownNow();
         }
     }
 
@@ -292,24 +300,9 @@ public class ProviderServer {
         protected void channelRead0(ChannelHandlerContext ctx, Request req) throws Exception {
             // 打印收到的请求
             log.info("收到请求: {}", req);
-
             // 根据入参，从注册表中查找对应的服务实例并调用
             ProviderRegistry.InvokerInstance<?> invokerInstance = providerRegistry.findInvokerInstance(req.getServiceName());
-            if (invokerInstance == null) {
-                log.error("未找到服务实例: {}", req.getServiceName());
-                Response response = Response.fail("服务未找到: " + req.getServiceName(), req.getRequestId());;
-                ctx.channel().writeAndFlush(response);
-                return;
-            }
-            try {
-                Object result = invokerInstance.invoke(req.getMethodName(), req.getParamsClass(), req.getParams());
-                Response response = Response.success(result, req.getRequestId());
-                ctx.channel().writeAndFlush(response);
-            } catch (Exception e) {
-                log.error("调用服务实例失败: {}", e.getMessage());
-                Response response = new Response();
-                ctx.channel().writeAndFlush(response);
-            }
+            invokerThreadPool.execute(new InvokeThread(ctx, req, invokerInstance));
         }
 
         @Override
@@ -331,6 +324,51 @@ public class ProviderServer {
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
             log.error("channel exception: {}", cause.getMessage());
             ctx.close();
+        }
+    }
+
+    private static class FastFailRejectedHandler implements RejectedExecutionHandler{
+
+        @Override
+        public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
+            if (r instanceof InvokeThread invokeThread) {
+                ChannelHandlerContext ctx = invokeThread.ctx;
+                Request request = invokeThread.req;
+                Response response = Response.fail("服务繁忙，请稍后重试（线程池已满）", request.getRequestId());
+                ctx.writeAndFlush(response);
+                return;
+            }
+            throw new RejectedExecutionException("task类型不对，无法处理");
+        }
+    }
+
+    @Data
+    @AllArgsConstructor
+    private class InvokeThread implements Runnable{
+        private ChannelHandlerContext ctx;
+        private Request req;
+        private ProviderRegistry.InvokerInstance<?> invokerInstance;
+
+        @Override
+        public void run() {
+            // 获取当前Channel绑定的EventLoop-workerEventGroup中的一个线程，保证同一连接的请求在同一线程上处理，避免线程切换带来的性能损耗
+            EventLoop channelEventLoop = ctx.channel().eventLoop();
+            if (invokerInstance == null) {
+                log.error("未找到服务实例: {}", req.getServiceName());
+                Response response = Response.fail("服务未找到: " + req.getServiceName(), req.getRequestId());;
+                channelEventLoop.execute(() -> ctx.channel().writeAndFlush(response));
+                return;
+            }
+            try {
+                Object result = invokerInstance.invoke(req.getMethodName(), req.getParamsClass(), req.getParams());
+                Response response = Response.success(result, req.getRequestId());
+                channelEventLoop.execute(() -> ctx.channel().writeAndFlush(response));
+                return;
+            } catch (Exception e) {
+                log.error("调用服务实例失败: {}", e.getMessage());
+                Response response = new Response();
+                channelEventLoop.execute(() -> ctx.channel().writeAndFlush(response));
+            }
         }
     }
 }
