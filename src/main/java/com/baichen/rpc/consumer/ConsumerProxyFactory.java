@@ -144,9 +144,6 @@ public class ConsumerProxyFactory {
          * 执行远程 RPC 调用
          */
         private Object invokeRemote(Method method, Object[] args) throws Exception {
-
-            long startTime = System.currentTimeMillis();
-
             // 从注册中心获取服务地址
             List<ServiceMateData> serviceMateDataList = new ArrayList<>(serviceRegistry.fetchSeviceList(interfaceClass.getName()));
             log.info("从注册中心获取到服务列表: {}", serviceMateDataList);
@@ -155,7 +152,6 @@ public class ConsumerProxyFactory {
             }
 
             ServiceMateData service;
-            // decideService throws RpcException when all nodes are circuit-broken
             try {
                 service = decideService(serviceMateDataList);
             } catch (RpcException e) {
