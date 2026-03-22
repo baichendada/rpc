@@ -54,13 +54,46 @@ public class ConsumerApp {
 //                }
 //            }).start();
 //        }
-        while (true) {
-            try {
-                consumer.add(1, 3);
-            } catch (Exception e) {
-                log.error("RPC 调用失败", e);
+//        while (true) {
+//            try {
+//                consumer.add(1, 3);
+//            } catch (Exception e) {
+//                log.error("RPC 调用失败", e);
+//            }
+//            Thread.sleep(300);
+//        }
+
+        new Thread(() -> {
+            while (true) {
+                try {
+                    log.info("调用 minus(1, 3) = {}", consumer.minus(3, 1));
+                } catch (Exception e) {
+                    log.error("RPC 调用失败", e);
+                }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    log.error("线程休眠被中断", e);
+                }
             }
-            Thread.sleep(300);
+        });
+
+        for (int i = 0; i < 10; i++) {
+            new Thread(() -> {
+                while (true) {
+                    try {
+                        log.info("调用 add(1, 3) = {}", consumer.add(3, 1));
+                    } catch (Exception e) {
+                        log.error("RPC 调用失败", e);
+                    }
+                    try {
+                        Thread.sleep(1000);
+                    } catch (InterruptedException e) {
+                        log.error("线程休眠被中断", e);
+                    }
+                }
+            });
         }
+
     }
 }
