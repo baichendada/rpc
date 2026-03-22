@@ -21,7 +21,6 @@ public class DefaultFallback implements Fallback {
     @Override
     public Object fallback(MetricsData metricsData) throws Exception {
         try {
-            // CacheFallback throws RpcException on cache miss, returns null on cached null
             return cacheFallback.fallback(metricsData);
         } catch (Exception e) {
             log.warn("缓存未命中，方法：{}，参数：{}", metricsData.getMethod().getName(), Arrays.toString(metricsData.getArgs()));
