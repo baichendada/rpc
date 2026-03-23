@@ -13,11 +13,16 @@ public class HeartbeatHandler extends SimpleChannelInboundHandler<Object> {
     protected void channelRead0(ChannelHandlerContext ctx, Object o) throws Exception {
         if (o instanceof HeartbeatRequest request) {
             ctx.writeAndFlush(new HeartbeatResponse(request.getRequestTime()));
+            // 心跳请求已处理，不再传递给后续 handler
+            return;
         } else if (o instanceof HeartbeatResponse response) {
             long latency = System.currentTimeMillis() - response.getRequestTime();
             log.info("{} 心跳响应，延迟 {} ms", ctx.channel().remoteAddress(), latency);
+            // 心跳响应已处理，不再传递给后续 handler
+            return;
         }
 
+        // 非心跳消息，传递给后续 handler 处理
         ctx.fireChannelRead(o);
     }
 
