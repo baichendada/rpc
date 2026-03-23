@@ -1,10 +1,12 @@
 package com.baichen.rpc.registry;
 
+import com.baichen.rpc.spi.SpiTag;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
 
 @Slf4j
+@SpiTag("redis")
 public class RedisServiceRegistry implements ServiceRegistry {
     @Override
     public void init(ServiceRegistryConfig config) throws Exception {

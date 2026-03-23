@@ -1,5 +1,27 @@
 # 更新日志
 
+## [v0.20] - 2026-03-24
+
+### SPI 重构
+
+#### 负载均衡器 SPI 化
+- **`LoaderBalancerManager`**：新增负载均衡器管理器，通过 SPI 加载实现
+- **`@SpiTag` 注解**：为 `RandomLoaderBalancer` 和 `RoundRobinLoaderBalancer` 添加注解
+- **配置变更**：`ConsumerProxyFactory` 使用 Manager 替代 switch-case 硬编码
+
+#### 服务注册中心 SPI 化
+- **`ServiceRegistryManager`**：新增注册中心管理器，通过 SPI 加载实现
+- **`@SpiTag` 注解**：为 `ZookeeperServiceRegistry` 和 `RedisServiceRegistry` 添加注解
+- **配置变更**：`DefaultServiceRegistry` 使用 Manager 替代 if-else 硬编码
+
+#### 熔断器 SPI 化
+- **`CircuitBreakerFactory`**：新增熔断器工厂接口，支持创建带配置的熔断器实例
+- **`ResponseTimeCircuitBreakerFactory`**：基于响应时间的熔断器工厂实现
+- **SPI 加载**：`CircuitBreakerManager` 通过 SPI 加载工厂创建熔断器
+- **配置新增**：`ConsumerProperties` 新增 `circuitBreakerType` 字段（默认 `responseTime`）
+
+---
+
 ## [v0.19] - 2026-03-23
 
 ### 新增功能

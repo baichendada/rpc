@@ -35,6 +35,9 @@ public class ConsumerProperties {
 
     private Double slowRequestRate = 0.5;
 
+    /** 熔断器类型：responseTime（基于响应时间） */
+    private String circuitBreakerType = "responseTime";
+
     /** 负载均衡策略：roundRobin（轮询）、random（随机） */
     private String loadBalancePolicy = "roundRobin";
 

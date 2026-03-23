@@ -1,10 +1,12 @@
 package com.baichen.rpc.loaderbalance;
 
 import com.baichen.rpc.registry.ServiceMateData;
+import com.baichen.rpc.spi.SpiTag;
 
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
+@SpiTag("roundRobin")
 public class RoundRobinLoaderBalancer implements LoaderBalancer {
 
     private final AtomicInteger count = new AtomicInteger(0);

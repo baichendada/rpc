@@ -1,10 +1,12 @@
 package com.baichen.rpc.loaderbalance;
 
 import com.baichen.rpc.registry.ServiceMateData;
+import com.baichen.rpc.spi.SpiTag;
 
 import java.util.List;
 import java.util.Random;
 
+@SpiTag("random")
 public class RandomLoaderBalancer implements LoaderBalancer {
 
     private final Random random = new Random();

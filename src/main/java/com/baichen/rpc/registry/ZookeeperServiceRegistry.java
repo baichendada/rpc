@@ -1,5 +1,6 @@
 package com.baichen.rpc.registry;
 
+import com.baichen.rpc.spi.SpiTag;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.retry.ExponentialBackoffRetry;
@@ -10,6 +11,7 @@ import org.apache.curator.x.discovery.details.JsonInstanceSerializer;
 
 import java.util.List;
 
+@SpiTag("zookeeper")
 public class ZookeeperServiceRegistry implements ServiceRegistry {
 
     private static final String BASE_PATH = "/rpc";

@@ -9,8 +9,7 @@ import com.baichen.rpc.breaker.CircuitBreaker;
 import com.baichen.rpc.breaker.CircuitBreakerManager;
 import com.baichen.rpc.exception.RpcException;
 import com.baichen.rpc.loaderbalance.LoaderBalancer;
-import com.baichen.rpc.loaderbalance.RandomLoaderBalancer;
-import com.baichen.rpc.loaderbalance.RoundRobinLoaderBalancer;
+import com.baichen.rpc.loaderbalance.LoaderBalancerManager;
 import com.baichen.rpc.message.Request;
 import com.baichen.rpc.message.Response;
 import com.baichen.rpc.registry.DefaultServiceRegistry;
@@ -43,6 +42,8 @@ public class ConsumerProxyFactory {
 
     private final LoaderBalancer balancer;
 
+    private final LoaderBalancerManager loaderBalancerManager;
+
     private final RetryPolicyManager retryPolicyManager;
 
     private final InFlightRequestManager inFlightRequestManager;
@@ -55,7 +56,8 @@ public class ConsumerProxyFactory {
         this.properties = properties;
         this.serviceRegistry = new DefaultServiceRegistry(properties.getServiceRegistryConfig());
         this.serviceRegistry.init(properties.getServiceRegistryConfig());
-        this.balancer = createLoaderBalancer(properties.getLoadBalancePolicy());
+        this.loaderBalancerManager = new LoaderBalancerManager();
+        this.balancer = loaderBalancerManager.getLoaderBalancer(properties.getLoadBalancePolicy());
         this.retryPolicyManager = new RetryPolicyManager();
         this.inFlightRequestManager = new InFlightRequestManager(properties);
         this.connectionManager = new ConnectionManager(properties, inFlightRequestManager);
@@ -77,18 +79,6 @@ public class ConsumerProxyFactory {
     public <I> I createConsumerProxy(Class<I> interfaceClass) {
         return (I) Proxy.newProxyInstance(Thread.currentThread().getContextClassLoader(), new Class[]{interfaceClass}
                 , new ConsumerInvocationHandler(interfaceClass, balancer, createRetryPolicy(properties.getRetryPolicy())));
-    }
-
-    private LoaderBalancer createLoaderBalancer(String loadBalancePolicy) {
-        switch (loadBalancePolicy) {
-            case "random" -> {
-                return new RandomLoaderBalancer();
-            }
-            case "roundRobin" -> {
-                return new RoundRobinLoaderBalancer();
-            }
-            default -> throw new IllegalArgumentException("Unsupported load balance policy: " + loadBalancePolicy);
-        }
     }
 
     private RetryPolicy createRetryPolicy(String retryPolicy) {

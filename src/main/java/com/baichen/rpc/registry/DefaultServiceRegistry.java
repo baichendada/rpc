@@ -15,7 +15,8 @@ public class DefaultServiceRegistry implements ServiceRegistry {
     private Map<String, List<ServiceMateData>> serviceCache = new ConcurrentHashMap<>();
 
     public DefaultServiceRegistry(ServiceRegistryConfig config) {
-        this.delegate = createServiceRegistry(config);
+        ServiceRegistryManager manager = new ServiceRegistryManager();
+        this.delegate = manager.getServiceRegistry(config.getRegistryType());
     }
 
     @Override
@@ -38,14 +39,5 @@ public class DefaultServiceRegistry implements ServiceRegistry {
         } catch (Exception e) {
             return serviceCache.getOrDefault(serviceName, new ArrayList<>());
         }
-    }
-
-    private ServiceRegistry createServiceRegistry(ServiceRegistryConfig config) {
-        if ("zookeeper".equalsIgnoreCase(config.getRegistryType())) {
-            return new ZookeeperServiceRegistry();
-        } else if ("redis".equalsIgnoreCase(config.getRegistryType())) {
-            return new RedisServiceRegistry();
-        }
-        throw new IllegalArgumentException("Unsupported registry type: " + config.getRegistryType());
     }
 }

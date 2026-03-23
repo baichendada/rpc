@@ -40,6 +40,7 @@ src/main/java/com/baichen/rpc/
     └── RpcException.java   # RPC 异常
 └── registry/         # 服务注册与发现
     ├── ServiceRegistry.java       # 服务注册接口
+    ├── ServiceRegistryManager.java # 注册中心管理器（SPI）
     ├── ServiceRegistryConfig.java # 注册中心配置
     ├── ServiceMateData.java       # 服务元数据
     ├── DefaultServiceRegistry.java # 注册中心代理（缓存容错）
@@ -47,6 +48,7 @@ src/main/java/com/baichen/rpc/
     └── RedisServiceRegistry.java  # Redis实现（未完成）
 └── loaderbalance/    # 负载均衡
     ├── LoaderBalancer.java        # 负载均衡接口
+    ├── LoaderBalancerManager.java # 负载均衡管理器（SPI）
     ├── RandomLoaderBalancer.java  # 随机负载均衡
     └── RoundRobinLoaderBalancer.java # 轮询负载均衡
 ├── retry/           # 重试机制
@@ -60,6 +62,12 @@ src/main/java/com/baichen/rpc/
     ├── RateLimiter.java          # 速率限流器（令牌桶算法）
     ├── ConcurrencyLimiter.java   # 并发限流器
     └── timeAreaLimiter.java      # 时间窗口限流器（已废弃）
+└── breaker/         # 熔断器
+    ├── CircuitBreaker.java       # 熔断器接口
+    ├── CircuitBreakerFactory.java # 熔断器工厂接口（SPI）
+    ├── CircuitBreakerManager.java # 熔断器管理器
+    ├── ResponseTimeCircuitBreaker.java # 基于响应时间的熔断器
+    └── ResponseTimeCircuitBreakerFactory.java # 熔断器工厂实现
 └── fallback/        # 降级机制
     ├── Fallback.java             # 降级接口
     ├── FallbackTag.java          # 降级实现类注解
@@ -119,6 +127,39 @@ Response 消息体包含响应码：
    - LengthFieldBasedFrameDecoder 根据 Length 字段粘包处理
    - decode 方法手动读取并校验 Magic 和 Type
    - 反序列化 Body 为 Request/Response 对象
+
+## SPI 可插拔机制
+
+项目基于 Java `ServiceLoader` 实现 SPI 机制，支持运行时热插拔扩展组件。
+
+### SPI 组件
+
+| 组件 | 接口 | Manager | 配置文件 |
+|------|------|---------|----------|
+| 序列化器 | `Serializer` | `SerializerManager` | `META-INF/services/com.baichen.rpc.serializer.Serializer` |
+| 压缩器 | `Compressor` | `CompressorManager` | `META-INF/services/com.baichen.rpc.compressor.Compressor` |
+| 重试策略 | `RetryPolicy` | `RetryPolicyManager` | `META-INF/services/com.baichen.rpc.retry.RetryPolicy` |
+| 负载均衡 | `LoaderBalancer` | `LoaderBalancerManager` | `META-INF/services/com.baichen.rpc.loaderbalance.LoaderBalancer` |
+| 服务注册 | `ServiceRegistry` | `ServiceRegistryManager` | `META-INF/services/com.baichen.rpc.registry.ServiceRegistry` |
+| 熔断器工厂 | `CircuitBreakerFactory` | `CircuitBreakerManager` | `META-INF/services/com.baichen.rpc.breaker.CircuitBreakerFactory` |
+
+### 扩展方式
+
+1. 实现对应接口
+2. 添加 `@SpiTag("name")` 注解
+3. 在 SPI 配置文件中注册
+
+### 配置项
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `serializerType` | json | 序列化方式 (json/hessian) |
+| `compressorType` | none | 压缩方式 (none/gzip) |
+| `retryPolicy` | forkAll | 重试策略 (forkAll/failOver/retrySame) |
+| `loadBalancePolicy` | roundRobin | 负载均衡 (roundRobin/random) |
+| `circuitBreakerType` | responseTime | 熔断器类型 (responseTime) |
+
+---
 
 ## 快速开始
 
@@ -201,7 +242,7 @@ RPC 服务端启动成功，监听端口: 8085
 - [x] 降级机制（缓存降级 + Mock 降级，支持 @FallbackTag 注解）
 - [x] 可插拔序列化（JSON / Hessian）
 - [x] 可插拔压缩（None / GZIP），消息体 ≤ 256 字节自动跳过压缩
-- [x] SPI 可插拔机制（基于 Java ServiceLoader），支持序列化器/压缩器/重试策略的热插拔
+- [x] SPI 可插拔机制（基于 Java ServiceLoader），支持序列化器/压缩器/重试策略/负载均衡器/注册中心/熔断器的热插拔
 - [x] 泛化调用（GenericConsumer），支持通过 `$invoke` 调用任意服务方法，无需接口依赖
 - [x] 统一编解码器（MessageEncoder/MessageDecoder），协议头新增版本号和序列化/压缩类型
 - [x] 心跳机制（HeartbeatHandler + IdleStateHandler），支持双向心跳检测和空闲连接关闭
@@ -228,10 +269,10 @@ RPC 框架支持两级限流保护：
 
 ## 待完善功能
 
-- [ ] 多种序列化方式（Hessian、Protobuf）
 - [ ] Redis 注册中心实现
 - [ ] 限流器配置动态化（支持运行时调整）
 - [ ] 降级策略配置化（支持运行时切换）
+- [ ] 多种熔断器实现（基于异常频率、混合策略等）
 
 ---
 

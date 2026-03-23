@@ -1,0 +1,2 @@
+com.baichen.rpc.registry.ZookeeperServiceRegistry
+com.baichen.rpc.registry.RedisServiceRegistry
