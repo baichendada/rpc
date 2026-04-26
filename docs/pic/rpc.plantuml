@@ -1,0 +1,233 @@
+@startuml
+title RPC 完整调用时序图
+hide footbox
+autonumber
+
+skinparam responseMessageBelowArrow true
+skinparam sequenceMessageAlign center
+skinparam sequence {
+  ArrowColor #555555
+  ActorBorderColor #555555
+  LifeLineBorderColor #888888
+  ParticipantBorderColor #888888
+  ParticipantBackgroundColor #FAFAFA
+  BoxBorderColor #AAAAAA
+}
+
+' ============ 参与者声明 ============
+box "Consumer Side" #EEF5FF
+  participant "ConsumerApp" as App
+  participant "ConsumerProxyFactory\n(InvocationHandler)" as Proxy
+  participant "DefaultServiceRegistry\n(ZK + 缓存兜底)" as Registry
+  participant "LoaderBalancer\n(Random / RoundRobin)" as LB
+  participant "CircuitBreakerManager" as CBM
+  participant "InFlightRequestManager\n(限流 + Future + 超时)" as IFRM
+  participant "ConnectionManager\n(Channel 池)" as CM
+  participant "Consumer Pipeline\n(Encoder/Decoder/Heartbeat)" as CPipeline
+end box
+
+box "Registry Side" #F0FFF0
+  participant "ZookeeperServiceRegistry" as ZK
+end box
+
+box "Provider Side" #FFF4E8
+  participant "Provider Pipeline\n(Traffic/Heartbeat/Decoder/Limiter)" as PPipeline
+  participant "ProviderServerHandler\n(业务分发)" as ServerHandler
+  participant "ProviderRegistry\n(服务实现映射)" as ProviderReg
+  participant "AddImpl\n(业务实现)" as Impl
+end box
+
+' ============ 第一阶段：服务发现 ============
+== 第一阶段：服务发现 ==
+
+App -> Proxy : proxy.add(1, 3)
+activate Proxy
+
+Proxy -> Registry : fetchServiceList(serviceName)
+activate Registry
+
+Registry -> ZK : getChildren(servicePath)
+activate ZK
+
+alt ZK 正常
+  ZK --> Registry : [host1:port1, host2:port2, ...]
+  Registry -> Registry : 更新本地缓存
+  Registry --> Proxy : List<ServiceMateData>
+else ZK 故障
+  ZK --> Registry : 抛出异常
+  deactivate ZK
+  Registry --> Proxy : serviceCache.getOrDefault()\n(缓存兜底，可能是旧地址)
+end
+deactivate Registry
+
+' ============ 第二阶段：负载均衡 + 熔断检查 ============
+== 第二阶段：负载均衡 + 熔断检查 ==
+
+Proxy -> LB : select(serviceList)
+activate LB
+LB --> Proxy : selectedService
+deactivate LB
+
+Proxy -> CBM : allowRequest(selectedService)
+activate CBM
+
+alt 熔断器 OPEN
+  CBM --> Proxy : false → 从列表移除，换下一个节点
+else 熔断器 CLOSED / HALF_OPEN
+  CBM --> Proxy : true → 允许通过
+end
+deactivate CBM
+
+' ============ 第三阶段：客户端限流 + 注册 Future ============
+== 第三阶段：客户端限流 + 注册 Future ==
+
+Proxy -> IFRM : putRequest(request, service, timeoutMs)
+activate IFRM
+
+IFRM -> IFRM : 全局并发限流 tryAcquire()\n[ConcurrencyLimiter / Semaphore]
+IFRM -> IFRM : 单服务速率限流 tryAcquire()\n[RateLimiter / AtomicLong CAS 令牌桶]
+IFRM -> IFRM : inFlightMap.put(requestId, future)
+IFRM -> IFRM : HashedWheelTimer 注册超时任务
+
+note right of IFRM
+  超时触发：
+  future.completeExceptionally()
+  → whenComplete 统一释放资源
+end note
+
+IFRM --> Proxy : CompletableFuture<Response>
+deactivate IFRM
+
+' ============ 第四阶段：建立连接 + 发送请求 ============
+== 第四阶段：建立连接 + 发送请求 ==
+
+Proxy -> CM : getChannel(service)
+activate CM
+
+alt Channel 已存在且活跃
+  CM --> Proxy : existingChannel
+else 首次 / 重连
+  CM -> CM : Bootstrap.connect(host, port).sync()
+  note right of CM
+    Consumer Pipeline:
+    TrafficRecordHandler
+    → MessageDecoder
+    → MessageEncoder
+    → IdleStateHandler
+    → HeartbeatHandler
+    → ConsumerChannelHandler
+  end note
+  CM --> Proxy : newChannel
+end
+deactivate CM
+
+Proxy -> CPipeline : channel.writeAndFlush(Request)
+activate CPipeline
+note right of CPipeline
+  MessageEncoder:
+  协议帧 Length(4B) | Magic(7B:"baichen")
+  | Type(1B) | Version(2B)
+  | SACType(1B) | Body(NB)
+  高4位=序列化类型 低4位=压缩类型
+  ≤256B 自动跳过压缩
+end note
+CPipeline -->> PPipeline : 字节流经网络传输
+deactivate CPipeline
+
+' ============ 第五阶段：Provider Pipeline 处理 ============
+== 第五阶段：Provider Pipeline 处理 ==
+
+activate PPipeline
+note right of PPipeline
+  Provider Pipeline 顺序:
+  1. TrafficRecordHandler (上行字节计数)
+  2. MessageDecoder (解压+反序列化)
+  3. MessageEncoder (响应序列化)
+  4. IdleStateHandler (读空闲30s/写空闲5s)
+  5. HeartbeatHandler (心跳拦截)
+  6. LimiterServerHandler (两级限流)
+  7. ProviderServerHandler (业务分发)
+end note
+
+alt 心跳消息 (HeartbeatRequest)
+  PPipeline -> PPipeline : HeartbeatHandler 回复 HeartbeatResponse
+  PPipeline -->> CPipeline : HeartbeatResponse（不往下传）
+else 业务消息
+  PPipeline -> PPipeline : LimiterServerHandler 两级限流检查\n[全局并发 + 单Channel速率]
+
+  alt 限流触发
+    PPipeline -->> CPipeline : Response.fail(400)
+  else 通过限流
+    PPipeline -> ServerHandler : fireChannelRead(Request)
+  end
+end
+deactivate PPipeline
+
+activate ServerHandler
+ServerHandler -> ProviderReg : findInvokerInstance(serviceName)
+activate ProviderReg
+ProviderReg --> ServerHandler : InvokerInstance
+deactivate ProviderReg
+
+ServerHandler -> Impl : invokerThreadPool 提交\n反射调用 add(1, 3)
+activate Impl
+Impl --> ServerHandler : result = 4
+deactivate Impl
+
+ServerHandler -> PPipeline : writeAndFlush(Response.success(4))
+activate PPipeline
+PPipeline -> PPipeline : MessageEncoder 序列化+压缩
+PPipeline -->> CPipeline : 响应字节流
+deactivate PPipeline
+deactivate ServerHandler
+
+' ============ 第六阶段：Consumer 接收响应 ============
+== 第六阶段：Consumer 接收响应 ==
+
+activate CPipeline
+CPipeline -> CPipeline : MessageDecoder 解码 → Response 对象
+CPipeline -> CPipeline : ConsumerChannelHandler.channelRead0()
+CPipeline -> IFRM : completeRequest(requestId, response)
+deactivate CPipeline
+
+activate IFRM
+IFRM -> IFRM : future.complete(response)
+IFRM -> IFRM : whenComplete: 取消超时定时器
+IFRM -> IFRM : whenComplete: globalLimiter.release()
+IFRM -> IFRM : whenComplete: serviceLimiter.release()
+IFRM --> Proxy : response
+deactivate IFRM
+
+Proxy -> CBM : circuitBreaker.recordRpc(metricsData)
+activate CBM
+CBM -> CBM : 更新滑动窗口 slowCount / requestCount\n慢请求率>阈值 && 总数>minCount → OPEN
+CBM --> Proxy
+deactivate CBM
+
+Proxy --> App : return 4
+deactivate Proxy
+
+' ============ 异常路径：重试 + 降级 ============
+== 异常路径：重试 + 降级（正常调用不经过此处）==
+
+group 调用失败时
+  Proxy -> Proxy : doRetry(metricsData, service)
+  note right
+    RetryPolicy (SPI):
+    RetrySamePolicy → 同节点指数退避重试
+    FailOverPolicy  → 排除失败节点换一个
+    ForkAllPolicy   → 并行打所有节点取最快
+  end note
+
+  alt 重试仍失败 / 超过总超时
+    Proxy -> Proxy : fallback.fallback(metricsData)
+    note right
+      DefaultFallback 责任链:
+      1. CacheFallback → 上次相同参数的成功结果
+      2. MockFallback  → @FallbackTag 指定的实现类
+    end note
+    Proxy --> App : 降级结果
+  end
+end
+
+@enduml
